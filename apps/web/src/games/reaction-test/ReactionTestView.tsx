@@ -23,7 +23,7 @@ function SubmissionStatusLine({ status }: { status: "idle" | "saving" | "saved" 
  */
 export function ReactionTestView() {
   const playerId = usePlayerId();
-  const { lifecycleState, phase, result, submissionStatus, start, click, reset } =
+  const { lifecycleState, phase, result, submissionStatus, starting, start, click, reset } =
     useReactionTestSession(playerId);
 
   if (!playerId || lifecycleState === "idle") {
@@ -35,7 +35,7 @@ export function ReactionTestView() {
         <button
           type="button"
           onClick={start}
-          disabled={!playerId}
+          disabled={!playerId || starting}
           className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Start
@@ -78,7 +78,8 @@ export function ReactionTestView() {
           <button
             type="button"
             onClick={start}
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+            disabled={starting}
+            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Try again
           </button>
@@ -96,7 +97,8 @@ export function ReactionTestView() {
           <button
             type="button"
             onClick={start}
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+            disabled={starting}
+            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Try again
           </button>

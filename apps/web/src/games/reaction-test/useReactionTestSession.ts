@@ -21,6 +21,8 @@ export interface ReactionTestView {
   result: GameResult<ReactionTestResultMetadata> | null;
   submissionStatus: SubmissionStatus;
   persistedResult: GameResultDto | null;
+  /** True while a GameSession is being created — the lifecycleState stays "idle" for the whole gap, so the UI needs this to disable Start/Try again and avoid a second, overlapping start() call. */
+  starting: boolean;
 }
 
 /**
@@ -39,9 +41,13 @@ export function useReactionTestSession(playerId: string | null) {
   );
   const revealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  // A ref, not state: must block a second start() call synchronously,
+  // before React has had a chance to re-render with an updated `starting`.
+  const startingRef = useRef(false);
+  const [starting, setStarting] = useState(false);
 
   const readView = useCallback(
-    (submissionStatus: SubmissionStatus, persistedResult: GameResultDto | null): ReactionTestView => ({
+    (submissionStatus: SubmissionStatus, persistedResult: GameResultDto | null): Omit<ReactionTestView, "starting"> => ({
       lifecycleState: session.lifecycleState,
       phase: session.lifecycleState === "idle" ? null : session.getGameState().phase,
       result: session.lifecycleState === "result" ? session.getResult() : null,
@@ -51,7 +57,7 @@ export function useReactionTestSession(playerId: string | null) {
     [session],
   );
 
-  const [view, setView] = useState<ReactionTestView>(() => readView("idle", null));
+  const [view, setView] = useState<Omit<ReactionTestView, "starting">>(() => readView("idle", null));
   const sync = useCallback(
     (submissionStatus: SubmissionStatus = view.submissionStatus, persistedResult = view.persistedResult) =>
       setView(readView(submissionStatus, persistedResult)),
@@ -69,31 +75,43 @@ export function useReactionTestSession(playerId: string | null) {
   useEffect(() => clearPendingReveal, [clearPendingReveal]);
 
   const start = useCallback(async () => {
-    if (!playerId) {
+    // Re-entrancy guard: without it, a second Start/Try-again click during
+    // the createGameSession() await below (the whole gap stays lifecycleState
+    // "idle" in the view, so nothing here disables the button on its own)
+    // races this call — both reach session.ready() and the loser throws
+    // InvalidLifecycleTransitionError against the winner's now-"playing" state.
+    if (!playerId || startingRef.current) {
       return;
     }
-    clearPendingReveal();
-    if (session.lifecycleState !== "idle") {
-      session.reset(); // allow "start" to double as "try again" from result/false-start
-    }
-    sessionIdRef.current = null;
-    setView(readView("idle", null));
+    startingRef.current = true;
+    setStarting(true);
+    try {
+      clearPendingReveal();
+      if (session.lifecycleState !== "idle") {
+        session.reset(); // allow "start" to double as "try again" from result/false-start
+      }
+      sessionIdRef.current = null;
+      setView(readView("idle", null));
 
-    // 1. Create GameSession — before any local play begins.
-    const apiSession = await createGameSession(GAME_ID, playerId);
-    sessionIdRef.current = apiSession.id;
+      // 1. Create GameSession — before any local play begins.
+      const apiSession = await createGameSession(GAME_ID, playerId);
+      sessionIdRef.current = apiSession.id;
 
-    // 2. Play Reaction Test.
-    session.ready();
-    session.start();
-    sync();
-
-    const { delayMs } = session.getGameState();
-    revealTimeoutRef.current = setTimeout(() => {
-      revealTimeoutRef.current = null;
-      session.submitInput({ type: "reveal" });
+      // 2. Play Reaction Test.
+      session.ready();
+      session.start();
       sync();
-    }, delayMs);
+
+      const { delayMs } = session.getGameState();
+      revealTimeoutRef.current = setTimeout(() => {
+        revealTimeoutRef.current = null;
+        session.submitInput({ type: "reveal" });
+        sync();
+      }, delayMs);
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
   }, [session, sync, clearPendingReveal, playerId, readView]);
 
   const click = useCallback(async () => {
@@ -144,5 +162,5 @@ export function useReactionTestSession(playerId: string | null) {
     setView(readView("idle", null));
   }, [session, clearPendingReveal, readView]);
 
-  return { ...view, start, click, reset };
+  return { ...view, starting, start, click, reset };
 }
