@@ -73,6 +73,36 @@ describe("validateGameResult", () => {
     ).toThrow(InvalidGameResultError);
   });
 
+  it("rejects an Infinity score", () => {
+    const result = playMockGameToResult();
+    expect(() =>
+      validateGameResult(
+        { ...result, score: Number.POSITIVE_INFINITY },
+        { gameId: result.gameId, scoreType: result.scoreType },
+      ),
+    ).toThrow(InvalidGameResultError);
+  });
+
+  it("rejects a negative score", () => {
+    const result = playMockGameToResult();
+    expect(() =>
+      validateGameResult(
+        { ...result, score: -1 },
+        { gameId: result.gameId, scoreType: result.scoreType },
+      ),
+    ).toThrow(InvalidGameResultError);
+  });
+
+  it("accepts a score of exactly zero", () => {
+    const result = playMockGameToResult();
+    expect(() =>
+      validateGameResult(
+        { ...result, score: 0 },
+        { gameId: result.gameId, scoreType: result.scoreType },
+      ),
+    ).not.toThrow();
+  });
+
   it("rejects a non-finite completedAt timestamp", () => {
     const result = playMockGameToResult();
     expect(() =>

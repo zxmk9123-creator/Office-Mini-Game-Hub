@@ -1,9 +1,17 @@
+import { MockGame } from "@mini-game-hub/game-core";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../app";
+import { getGameRegistry } from "../gameRegistry";
 import { ensureGamesSynced, resetTestData } from "./testDb";
 
-beforeAll(ensureGamesSynced);
+beforeAll(async () => {
+  const gameRegistry = getGameRegistry();
+  if (!gameRegistry.has("mock-game")) {
+    gameRegistry.register(new MockGame()); // only used by the "wrong game" test below
+  }
+  await ensureGamesSynced();
+});
 beforeEach(resetTestData);
 
 const app = createApp();
@@ -118,6 +126,104 @@ describe("GET /api/sessions/:id", () => {
     const res = await request(app).get("/api/sessions/not-a-uuid");
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("validation_error");
+  });
+});
+
+async function createSession(playerId: string, gameId = "reaction-test") {
+  const res = await request(app).post(`/api/games/${gameId}/sessions`).send({ playerId });
+  return res.body as { id: string };
+}
+
+describe("POST /api/games/:gameId/results", () => {
+  it("submits a valid completed result and returns 201", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({
+        sessionId: session.id,
+        score: 237,
+        completion: { reason: "completed", completedAt: 1000 },
+        metadata: { reactionTimeMs: 237, falseStart: false },
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      sessionId: session.id,
+      playerId: player.id,
+      gameId: "reaction-test",
+      score: 237,
+    });
+  });
+
+  it("returns 400 for a malformed request (missing sessionId)", async () => {
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({ score: 100, completion: { reason: "completed", completedAt: 1 }, metadata: {} });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
+  it("returns 404 for a nonexistent session", async () => {
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({
+        sessionId: "00000000-0000-0000-0000-000000000000",
+        score: 100,
+        completion: { reason: "completed", completedAt: 1 },
+        metadata: {},
+      });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("session_not_found");
+  });
+
+  it("returns 404 when the session belongs to a different game", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id, "reaction-test");
+
+    const res = await request(app)
+      .post("/api/games/mock-game/results")
+      .send({
+        sessionId: session.id,
+        score: 1,
+        completion: { reason: "completed", completedAt: 1 },
+        metadata: {},
+      });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 409 for a duplicate submission", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+    const body = {
+      sessionId: session.id,
+      score: 237,
+      completion: { reason: "completed", completedAt: 1000 },
+      metadata: {},
+    };
+
+    const first = await request(app).post("/api/games/reaction-test/results").send(body);
+    expect(first.status).toBe(201);
+
+    const second = await request(app).post("/api/games/reaction-test/results").send(body);
+    expect(second.status).toBe(409);
+  });
+
+  it("returns 422 for a semantically invalid result (negative score)", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({
+        sessionId: session.id,
+        score: -5,
+        completion: { reason: "completed", completedAt: 1000 },
+        metadata: {},
+      });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_result");
   });
 });
 

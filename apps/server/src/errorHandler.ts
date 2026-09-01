@@ -1,12 +1,17 @@
 import type { ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
-import { GameNotFoundError } from "@mini-game-hub/game-core";
+import { GameNotFoundError, InvalidGameResultError } from "@mini-game-hub/game-core";
 import { InvalidNicknameError, PlayerNotFoundError } from "./services/playerService";
 import {
   GameDisabledError,
   InvalidSessionTransitionError,
   SessionNotFoundError,
 } from "./services/gameSessionService";
+import {
+  DuplicateResultError,
+  SessionGameMismatchError,
+  SessionNotEligibleError,
+} from "./services/gameResultService";
 
 /**
  * Translates domain errors raised by services into HTTP responses. Route
@@ -40,6 +45,22 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
   if (err instanceof InvalidSessionTransitionError) {
     res.status(409).json({ error: "invalid_session_transition", message: err.message });
+    return;
+  }
+  if (err instanceof SessionGameMismatchError) {
+    res.status(404).json({ error: "session_not_found", message: err.message });
+    return;
+  }
+  if (err instanceof SessionNotEligibleError) {
+    res.status(409).json({ error: "session_not_eligible", message: err.message });
+    return;
+  }
+  if (err instanceof DuplicateResultError) {
+    res.status(409).json({ error: "duplicate_result", message: err.message });
+    return;
+  }
+  if (err instanceof InvalidGameResultError) {
+    res.status(422).json({ error: "invalid_result", message: err.message });
     return;
   }
 

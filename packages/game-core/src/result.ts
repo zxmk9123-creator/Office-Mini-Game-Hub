@@ -28,9 +28,16 @@ export function validateGameResult(
   }
   if (result.completion.reason === "completed") {
     if (result.score === null || !Number.isFinite(result.score)) {
+      // Number.isFinite rejects NaN, +/-Infinity, and non-numbers alike.
       throw new InvalidGameResultError(
         `A "completed" result must have a finite score, got ${result.score}`,
       );
+    }
+    // Every current game's score is a duration or a count — never
+    // negative. Revisit this as a per-game rule if a future game's score
+    // semantics genuinely require negative values.
+    if (result.score < 0) {
+      throw new InvalidGameResultError(`Result score must not be negative, got ${result.score}`);
     }
   } else if (result.score !== null) {
     throw new InvalidGameResultError(

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { gameSessions, type Database } from "@mini-game-hub/database";
+import { gameSessions, type DbClient } from "@mini-game-hub/database";
 
 export type GameSessionStatus = "started" | "completed" | "invalid" | "abandoned";
 
@@ -23,7 +23,7 @@ export interface GameSessionRepository {
 }
 
 export class DrizzleGameSessionRepository implements GameSessionRepository {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: DbClient) {}
 
   async create(input: { playerId: string; gameId: string }): Promise<GameSessionRecord> {
     const [row] = await this.db

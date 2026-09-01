@@ -51,7 +51,13 @@ export const gameSessions = pgTable(
 
 export const gameResults = pgTable("game_results", {
   id: uuid("id").primaryKey().defaultRandom(),
-  sessionId: uuid("session_id").notNull().references(() => gameSessions.id),
+  // unique: a session represents exactly one attempt, so it may have at
+  // most one result — enforced here, not just in application code, so a
+  // race between two concurrent submissions can't create two rows.
+  sessionId: uuid("session_id")
+    .notNull()
+    .unique()
+    .references(() => gameSessions.id),
   playerId: uuid("player_id").notNull().references(() => players.id),
   gameId: text("game_id").notNull().references(() => games.id),
   score: integer("score"),

@@ -5,14 +5,15 @@
 
 ## Status
 
-**Phase 4 — Player / Game Session architecture** 완료.
+**Phase 5 — Game Result 영속화 & 서버 검증** 완료.
 
 - Phase 1: 모노레포 뼈대, 빌드 도구 체인, DB 스키마 초안
 - Phase 2: 프레임워크에 종속되지 않는 Game Core (Game 계약, 플랫폼 라이프사이클, GameRegistry, Mock Game)
 - Phase 3: Reaction Test 게임 엔진 + React 프레젠테이션
 - Phase 4: Player / GameSession 도메인, REST API, GameRegistry와 연동된 세션 생성
+- Phase 5: GameResult 영속화(GameResultService), 세션↔결과 무결성(중복 제출 방지), 트랜잭션 원자성, Reaction Test ↔ 결과 API 연동
 
-랭킹, 결과(GameResult) 영속화, 인증, 리더보드 UI는 아직 구현하지 않았다.
+랭킹, 인증, 리더보드 UI, 안티치트는 아직 구현하지 않았다.
 
 ## Structure
 
@@ -48,13 +49,15 @@ npm run dev:server
 npm run dev:web
 ```
 
-## API (Phase 4)
+## API
 
 ```text
 POST /api/players                 { nickname } -> 201 Player
 GET  /api/players/:id             -> 200 Player | 404
 POST /api/games/:gameId/sessions  { playerId } -> 201 GameSession | 404 (player/game) | 409 (disabled game)
 GET  /api/sessions/:id            -> 200 GameSession | 404
+POST /api/games/:gameId/results   { sessionId, score, completion, metadata }
+                                   -> 201 GameResult | 404 (session/game) | 409 (terminal/duplicate) | 422 (invalid result)
 GET  /api/health                  -> 200 { status: "ok" }
 ```
 
