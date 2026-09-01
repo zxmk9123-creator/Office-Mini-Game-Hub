@@ -1,5 +1,16 @@
 import type { GameCompletionReason } from "@mini-game-hub/game-core";
 
+/**
+ * Base URL the API lives at, with no trailing slash. Empty by default —
+ * requests go to a same-origin relative "/api/..." path, which the Vite
+ * dev server proxies to the local API (see vite.config.ts) and which also
+ * works if the API is ever served from the same origin as the web app in
+ * production. When the API is deployed at a separate origin (e.g. a
+ * standalone Render web service), set VITE_API_BASE_URL to that origin at
+ * build time — nothing else in this file changes.
+ */
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -11,7 +22,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE_URL}/api${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });

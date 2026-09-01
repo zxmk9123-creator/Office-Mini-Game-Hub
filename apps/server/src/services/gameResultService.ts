@@ -11,7 +11,7 @@ import {
   type GameSessionRepository,
   type GameSessionStatus,
 } from "../repositories/gameSessionRepository";
-import { SessionNotFoundError } from "./gameSessionService";
+import { GameDisabledError, SessionNotFoundError } from "./gameSessionService";
 
 export class SessionGameMismatchError extends Error {
   constructor(
@@ -84,6 +84,9 @@ export class GameResultService {
   async submitResult(gameId: string, input: SubmitResultInput): Promise<GameResultRecord> {
     // GameRegistry.get() throws GameNotFoundError for an unregistered id.
     const game = this.gameRegistry.get(gameId);
+    if (!game.metadata.enabled) {
+      throw new GameDisabledError(gameId);
+    }
 
     // Validate the GameResult contract itself before touching the database.
     validateGameResult(

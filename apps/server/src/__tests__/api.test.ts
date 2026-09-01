@@ -1,14 +1,40 @@
-import { MockGame } from "@mini-game-hub/game-core";
+import type { Game } from "@mini-game-hub/game-core";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../app";
 import { getGameRegistry } from "../gameRegistry";
 import { ensureGamesSynced, resetTestData } from "./testDb";
 
+// A second, real, *enabled* game — only registered so the "wrong game" test
+// below has a distinct, enabled game to submit against (an already-disabled
+// game would fail the enabled check before the mismatch check ever runs).
+const secondEnabledGame: Game = {
+  metadata: {
+    id: "second-enabled-game",
+    name: "Second Enabled Game",
+    description: "Test double used only to prove the results API is game-agnostic.",
+    icon: "second",
+    scoreType: "higher_is_better",
+    version: "1.0.0",
+    enabled: true,
+  },
+  createInitialState: () => ({}),
+  start: (state) => state,
+  handleInput: (state) => state,
+  isFinished: () => true,
+  computeResult: () => ({
+    gameId: "second-enabled-game",
+    scoreType: "higher_is_better",
+    score: 0,
+    completion: { reason: "completed", completedAt: 0 },
+    metadata: {},
+  }),
+};
+
 beforeAll(async () => {
   const gameRegistry = getGameRegistry();
-  if (!gameRegistry.has("mock-game")) {
-    gameRegistry.register(new MockGame()); // only used by the "wrong game" test below
+  if (!gameRegistry.has("second-enabled-game")) {
+    gameRegistry.register(secondEnabledGame);
   }
   await ensureGamesSynced();
 });
@@ -165,6 +191,51 @@ describe("POST /api/games/:gameId/results", () => {
     expect(res.body.error).toBe("validation_error");
   });
 
+  it("returns 400 for a malformed score (a string instead of a number)", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({
+        sessionId: session.id,
+        score: "237",
+        completion: { reason: "completed", completedAt: 1000 },
+        metadata: {},
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
+  it("returns 400 for malformed metadata (not an object)", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({
+        sessionId: session.id,
+        score: 237,
+        completion: { reason: "completed", completedAt: 1000 },
+        metadata: "not-an-object",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
+  it("returns 400 for an invalid completion.reason", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+    const res = await request(app)
+      .post("/api/games/reaction-test/results")
+      .send({
+        sessionId: session.id,
+        score: 237,
+        completion: { reason: "not-a-real-reason", completedAt: 1000 },
+        metadata: {},
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
   it("returns 404 for a nonexistent session", async () => {
     const res = await request(app)
       .post("/api/games/reaction-test/results")
@@ -183,7 +254,7 @@ describe("POST /api/games/:gameId/results", () => {
     const session = await createSession(player.id, "reaction-test");
 
     const res = await request(app)
-      .post("/api/games/mock-game/results")
+      .post("/api/games/second-enabled-game/results")
       .send({
         sessionId: session.id,
         score: 1,

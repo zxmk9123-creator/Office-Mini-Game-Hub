@@ -13,7 +13,9 @@
 - Phase 4: Player / GameSession 도메인, REST API, GameRegistry와 연동된 세션 생성
 - Phase 5: GameResult 영속화(GameResultService), 세션↔결과 무결성(중복 제출 방지), 트랜잭션 원자성, Reaction Test ↔ 결과 API 연동
 
-랭킹, 인증, 리더보드 UI, 안티치트는 아직 구현하지 않았다.
+랭킹, 인증, 리더보드 UI, 안티치트는 아직 구현하지 않았다. Render 배포 자체는 Phase 6에서 진행 — 이번 Phase 5는
+배포를 하지 않고, 나중에 아키텍처를 다시 손대지 않고 Render에 올릴 수 있도록 환경변수 기반 설정(`VITE_API_BASE_URL`,
+`CORS_ORIGIN`, `PORT`, `DATABASE_URL`)만 준비해 두었다.
 
 ## Structure
 
@@ -45,8 +47,21 @@ npm run --workspace=packages/database generate   # only after changing schema.ts
 npm run --workspace=packages/database migrate     # apply migrations to DATABASE_URL
 npm run dev:server
 
-# web
+# web (see apps/web/.env.example — VITE_API_BASE_URL)
+cp apps/web/.env.example apps/web/.env
 npm run dev:web
+```
+
+## Environment variables
+
+```text
+server (.env, or real env vars in production):
+  DATABASE_URL   postgres connection string (required)
+  PORT           defaults to 4000
+  CORS_ORIGIN    comma-separated allowed origins; defaults to http://localhost:5173
+
+web (apps/web/.env, baked in at build time):
+  VITE_API_BASE_URL   API origin, no trailing slash; empty = same-origin "/api/..."
 ```
 
 ## API

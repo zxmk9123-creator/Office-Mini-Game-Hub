@@ -1,4 +1,4 @@
-import { GameNotFoundError, InvalidGameResultError, MockGame } from "@mini-game-hub/game-core";
+import { GameNotFoundError, InvalidGameResultError, MockGame, type Game } from "@mini-game-hub/game-core";
 import { eq } from "drizzle-orm";
 import { gameSessions } from "@mini-game-hub/database";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import { DrizzleGameSessionRepository } from "../repositories/gameSessionReposit
 import { DrizzleGameResultRepository } from "../repositories/gameResultRepository";
 import { DrizzlePlayerRepository } from "../repositories/playerRepository";
 import { PlayerService } from "../services/playerService";
-import { GameSessionService } from "../services/gameSessionService";
+import { GameDisabledError, GameSessionService } from "../services/gameSessionService";
 import {
   DuplicateResultError,
   GameResultService,
@@ -18,14 +18,43 @@ import {
 import { SessionNotFoundError } from "../services/gameSessionService";
 import { ensureGamesSynced, resetTestData } from "./testDb";
 
+/**
+ * A second, real, *enabled* game — distinct from both reaction-test and
+ * the (disabled) MockGame — so the "wrong game" tests have a game they can
+ * actually submit against without tripping the enabled-game check first.
+ * It is never used to create an actual session in these tests.
+ */
+const secondEnabledGame: Game = {
+  metadata: {
+    id: "second-enabled-game",
+    name: "Second Enabled Game",
+    description: "Test double used only to prove GameResultService is game-agnostic.",
+    icon: "second",
+    scoreType: "higher_is_better",
+    version: "1.0.0",
+    enabled: true,
+  },
+  createInitialState: () => ({}),
+  start: (state) => state,
+  handleInput: (state) => state,
+  isFinished: () => true,
+  computeResult: () => ({
+    gameId: "second-enabled-game",
+    scoreType: "higher_is_better",
+    score: 0,
+    completion: { reason: "completed", completedAt: 0 },
+    metadata: {},
+  }),
+};
+
 const gameRegistry = getGameRegistry();
 
 beforeAll(async () => {
-  // A second, distinct game — only registered so the "wrong game" test has
-  // a real registered game other than reaction-test to submit against. It
-  // is never used to create an actual session in these tests.
   if (!gameRegistry.has("mock-game")) {
-    gameRegistry.register(new MockGame());
+    gameRegistry.register(new MockGame()); // used by the "disabled game" test
+  }
+  if (!gameRegistry.has("second-enabled-game")) {
+    gameRegistry.register(secondEnabledGame);
   }
   await ensureGamesSynced();
 });
@@ -129,6 +158,25 @@ describe("GameResultService.submitResult: validation", () => {
       resultService.submitResult("does-not-exist", validCompletedInput(session.id)),
     ).rejects.toThrow(GameNotFoundError);
   });
+
+  it("rejects a submission for a disabled game", async () => {
+    // mock-game is registered but disabled (mockGameMetadata.enabled === false).
+    // A session couldn't be created for it today via GameSessionService (it
+    // also checks enabled), but an existing session created before a game
+    // was disabled must still be rejected at submission time — insert one
+    // directly, bypassing that check, to simulate exactly that case.
+    const player = await playerService.createPlayer("Alex");
+    const session = await sessionRepository.create({ playerId: player.id, gameId: "mock-game" });
+
+    await expect(
+      resultService.submitResult("mock-game", {
+        sessionId: session.id,
+        score: 1,
+        completion: { reason: "completed", completedAt: 1 },
+        metadata: {},
+      }),
+    ).rejects.toThrow(GameDisabledError);
+  });
 });
 
 describe("GameResultService.submitResult: persistence", () => {
@@ -197,7 +245,7 @@ describe("GameResultService.submitResult: session integrity", () => {
   it("rejects a submission where the session belongs to a different game", async () => {
     const { session } = await createStartedSession(); // session.gameId === "reaction-test"
     await expect(
-      resultService.submitResult("mock-game", { ...validCompletedInput(session.id), score: 1 }),
+      resultService.submitResult("second-enabled-game", { ...validCompletedInput(session.id), score: 1 }),
     ).rejects.toThrow(SessionGameMismatchError);
   });
 });

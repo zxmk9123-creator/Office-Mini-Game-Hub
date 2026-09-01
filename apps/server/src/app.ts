@@ -11,6 +11,7 @@ import { createPlayersRouter } from "./routes/players";
 import { createSessionsRouter } from "./routes/sessions";
 import { createResultsRouter } from "./routes/results";
 import { errorHandler } from "./errorHandler";
+import { resolveCorsOrigins } from "./cors";
 
 /** Builds the Express app with all routes wired to real services/repositories. */
 export function createApp(): Express {
@@ -24,7 +25,7 @@ export function createApp(): Express {
   const resultService = new GameResultService(db, gameRegistry);
 
   const app = express();
-  app.use(cors());
+  app.use(cors({ origin: resolveCorsOrigins(process.env.CORS_ORIGIN) }));
   app.use(express.json());
 
   app.get("/api/health", (_req, res) => {
