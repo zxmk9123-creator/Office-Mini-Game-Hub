@@ -4,8 +4,13 @@ import * as schema from "./schema";
 
 export * from "./schema";
 
-export function createDb(connectionString: string) {
-  const client = postgres(connectionString);
+export interface CreateDbOptions {
+  /** Passed straight through to the `postgres` client's `ssl` option (e.g. `{ rejectUnauthorized: false }` for a managed Postgres with a self-signed cert). Omit for a plain, unencrypted local connection. */
+  ssl?: postgres.Options<Record<string, never>>["ssl"];
+}
+
+export function createDb(connectionString: string, options: CreateDbOptions = {}) {
+  const client = postgres(connectionString, { ssl: options.ssl });
   return drizzle(client, { schema });
 }
 
