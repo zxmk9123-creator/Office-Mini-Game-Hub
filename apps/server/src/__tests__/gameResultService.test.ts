@@ -198,6 +198,19 @@ describe("GameResultService.submitResult: persistence", () => {
     const stored = await resultRepository.findBySessionId(session.id);
     expect(stored).toEqual(result);
   });
+
+  it("persists a non-integer score exactly (performance.now() deltas are sub-millisecond floats)", async () => {
+    const { session } = await createStartedSession();
+    const result = await resultService.submitResult(
+      "reaction-test",
+      validCompletedInput(session.id, 376.09999999403954),
+    );
+    expect(result.score).toBe(376.09999999403954);
+
+    const resultRepository = new DrizzleGameResultRepository(db);
+    const stored = await resultRepository.findBySessionId(session.id);
+    expect(stored?.score).toBe(376.09999999403954);
+  });
 });
 
 describe("GameResultService.submitResult: session integrity", () => {

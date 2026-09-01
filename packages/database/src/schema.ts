@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, doublePrecision, jsonb, boolean, index } from "drizzle-orm/pg-core";
 
 export const players = pgTable("players", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -60,7 +60,10 @@ export const gameResults = pgTable("game_results", {
     .references(() => gameSessions.id),
   playerId: uuid("player_id").notNull().references(() => players.id),
   gameId: text("game_id").notNull().references(() => games.id),
-  score: integer("score"),
+  // A generic score, not necessarily a whole number — e.g. Reaction Test's
+  // score comes from performance.now() deltas, which are sub-millisecond
+  // floats (376.09999999403954), not integers.
+  score: doublePrecision("score"),
   metadata: jsonb("metadata").notNull().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
