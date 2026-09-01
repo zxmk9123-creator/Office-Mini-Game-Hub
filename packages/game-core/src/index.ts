@@ -34,3 +34,19 @@ export {
   type MockGameInput,
   type MockGameResultMetadata,
 } from "./games/mock-game";
+
+export {
+  ReactionTestGame,
+  ReactionTestInputError,
+  reactionTestMetadata,
+  REACTION_TEST_MIN_DELAY_MS,
+  REACTION_TEST_MAX_DELAY_MS,
+  MathRandomDelaySource,
+  REACTION_PHASES,
+  type Clock,
+  type RandomDelaySource,
+  type ReactionPhase,
+  type ReactionTestState,
+  type ReactionTestInput,
+  type ReactionTestResultMetadata,
+} from "./games/reaction-test";
