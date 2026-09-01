@@ -5,8 +5,14 @@
 
 ## Status
 
-**Phase 1 — Foundation** 완료. 모노레포 뼈대, 빌드 도구 체인, DB 스키마 초안까지 세팅되어 있다.
-Game Interface / Game Registry / Reaction Test 구현은 Phase 2부터 진행한다.
+**Phase 4 — Player / Game Session architecture** 완료.
+
+- Phase 1: 모노레포 뼈대, 빌드 도구 체인, DB 스키마 초안
+- Phase 2: 프레임워크에 종속되지 않는 Game Core (Game 계약, 플랫폼 라이프사이클, GameRegistry, Mock Game)
+- Phase 3: Reaction Test 게임 엔진 + React 프레젠테이션
+- Phase 4: Player / GameSession 도메인, REST API, GameRegistry와 연동된 세션 생성
+
+랭킹, 결과(GameResult) 영속화, 인증, 리더보드 UI는 아직 구현하지 않았다.
 
 ## Structure
 
@@ -15,10 +21,16 @@ mini-game-hub/
 ├── apps/
 │   ├── web/      React + TypeScript + Vite + Tailwind CSS
 │   └── server/   Node.js + Express + TypeScript
+│       └── src/
+│           ├── routes/        HTTP boundary (Zod validation)
+│           ├── services/      PlayerService, GameSessionService
+│           ├── repositories/  Drizzle-backed Player/GameSession persistence
+│           ├── gameRegistry.ts  application-level GameRegistry wiring
+│           └── syncGamesTable.ts  registry -> `games` table sync
 ├── packages/
-│   ├── database/  Drizzle ORM schema (players, games, game_sessions, game_results)
+│   ├── database/  Drizzle ORM schema (players, games, game_sessions, game_results) + migrations
 │   ├── shared/    공통 타입 (Zod, scoreType 등)
-│   └── game-core/ Game Interface / Registry (Phase 2에서 구현)
+│   └── game-core/ Game Interface / Registry / Reaction Test 엔진
 ```
 
 ## Getting started
@@ -28,10 +40,22 @@ npm install
 
 # server (needs a running Postgres; see .env.example)
 cp .env.example .env
+npm run --workspace=packages/database generate   # only after changing schema.ts
+npm run --workspace=packages/database migrate     # apply migrations to DATABASE_URL
 npm run dev:server
 
 # web
 npm run dev:web
+```
+
+## API (Phase 4)
+
+```text
+POST /api/players                 { nickname } -> 201 Player
+GET  /api/players/:id             -> 200 Player | 404
+POST /api/games/:gameId/sessions  { playerId } -> 201 GameSession | 404 (player/game) | 409 (disabled game)
+GET  /api/sessions/:id            -> 200 GameSession | 404
+GET  /api/health                  -> 200 { status: "ok" }
 ```
 
 ## Stack

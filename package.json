@@ -14,6 +14,7 @@
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
+    "drizzle-orm": "^0.45.2",
     "typescript": "^5.5.4"
   }
 }

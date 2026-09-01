@@ -113,9 +113,9 @@ export class ReactionTestGame
     return {
       gameId: this.metadata.id,
       scoreType: this.metadata.scoreType,
-      // A false start has no meaningful reaction time — NaN keeps it out of
-      // any score comparison/persistence path that checks Number.isFinite.
-      score: state.falseStart || state.reactionTimeMs === null ? Number.NaN : state.reactionTimeMs,
+      // A false start has no meaningful reaction time — null, not NaN,
+      // survives JSON/SQL serialization and is what validateGameResult requires.
+      score: state.falseStart || state.reactionTimeMs === null ? null : state.reactionTimeMs,
       completion: {
         reason: state.falseStart ? "invalid" : "completed",
         completedAt: this.clock.now(),

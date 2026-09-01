@@ -135,7 +135,7 @@ describe("ReactionTestGame: false start", () => {
 
     const result = game.computeResult(state);
     expect(result.completion.reason).toBe("invalid");
-    expect(Number.isNaN(result.score)).toBe(true);
+    expect(result.score).toBeNull();
     expect(result.metadata).toEqual({ reactionTimeMs: null, falseStart: true });
   });
 

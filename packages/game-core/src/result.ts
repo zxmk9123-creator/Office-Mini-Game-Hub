@@ -26,8 +26,16 @@ export function validateGameResult(
       `Result scoreType "${result.scoreType}" does not match expected "${expected.scoreType}"`,
     );
   }
-  if (!Number.isFinite(result.score)) {
-    throw new InvalidGameResultError(`Result score must be a finite number, got ${result.score}`);
+  if (result.completion.reason === "completed") {
+    if (result.score === null || !Number.isFinite(result.score)) {
+      throw new InvalidGameResultError(
+        `A "completed" result must have a finite score, got ${result.score}`,
+      );
+    }
+  } else if (result.score !== null) {
+    throw new InvalidGameResultError(
+      `A "${result.completion.reason}" result must have a null score, got ${result.score}`,
+    );
   }
   if (!Number.isFinite(result.completion.completedAt)) {
     throw new InvalidGameResultError("Result completion.completedAt must be a finite timestamp");

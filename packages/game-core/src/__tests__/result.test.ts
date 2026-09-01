@@ -43,6 +43,36 @@ describe("validateGameResult", () => {
     ).toThrow(InvalidGameResultError);
   });
 
+  it("rejects a null score on a completed result", () => {
+    const result = playMockGameToResult();
+    expect(() =>
+      validateGameResult(
+        { ...result, score: null },
+        { gameId: result.gameId, scoreType: result.scoreType },
+      ),
+    ).toThrow(InvalidGameResultError);
+  });
+
+  it("accepts a null score on an invalid result", () => {
+    const result = playMockGameToResult();
+    expect(() =>
+      validateGameResult(
+        { ...result, score: null, completion: { ...result.completion, reason: "invalid" } },
+        { gameId: result.gameId, scoreType: result.scoreType },
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a non-null score on an invalid result", () => {
+    const result = playMockGameToResult();
+    expect(() =>
+      validateGameResult(
+        { ...result, completion: { ...result.completion, reason: "invalid" } },
+        { gameId: result.gameId, scoreType: result.scoreType },
+      ),
+    ).toThrow(InvalidGameResultError);
+  });
+
   it("rejects a non-finite completedAt timestamp", () => {
     const result = playMockGameToResult();
     expect(() =>

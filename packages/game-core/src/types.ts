@@ -43,11 +43,18 @@ export interface GameCompletion {
  * Generic result contract. The platform only ever reads score/scoreType/
  * completion — `metadata` is per-game and opaque to game-core, the registry,
  * ranking, and persistence.
+ *
+ * `score` is `null` whenever `completion.reason !== "completed"` (a false
+ * start, an aborted or otherwise invalid attempt) — there is no reaction
+ * time, WPM, or any other score to report. `null` is explicit and survives
+ * JSON/HTTP/SQL serialization intact, unlike `NaN` (which `JSON.stringify`
+ * silently turns into `null` anyway, and which most SQL numeric columns
+ * reject outright) — see `validateGameResult`, which enforces this pairing.
  */
 export interface GameResult<TResultMetadata = unknown> {
   gameId: string;
   scoreType: ScoreType;
-  score: number;
+  score: number | null;
   completion: GameCompletion;
   metadata: TResultMetadata;
 }
