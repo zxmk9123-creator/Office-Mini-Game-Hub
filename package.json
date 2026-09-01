@@ -9,7 +9,7 @@
   "scripts": {
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:server": "npm run dev --workspace=apps/server",
-    "start": "npm run start --workspace=apps/server",
+    "start": "npm run --workspace=packages/database migrate && npm run start --workspace=apps/server",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
