@@ -49,8 +49,14 @@ export const BALL_RADIUS = 0.12;
 export const BASE_BALL_SPEED = 6; // logical units / second
 export const MAX_BALL_SPEED = 10;
 
-/** Never spawn more than this many new bricks in a single turn. */
+/** Never spawn more than this many new bricks in a single turn. Red bonus balls are separate from this cap. */
 export const MAX_NEW_BRICKS_PER_TURN = 5;
+
+/** Chance, per turn, that a single red bonus ball spawns alongside that turn's bricks. */
+export const RED_BONUS_BALL_SPAWN_CHANCE = 0.2;
+
+/** Row 0 is a permanent empty buffer — nothing may ever spawn or persist there. The active formation area is rows 1..BOARD_ROWS-1. */
+export const FORMATION_TOP_ROW = 1;
 
 /** Aim is clamped to this many radians either side of straight up — never horizontal or downward. */
 export const MAX_AIM_RADIANS = (70 * Math.PI) / 180;
@@ -75,6 +81,17 @@ export interface Ball {
   active: boolean;
 }
 
+/**
+ * A static, grid-positioned collectible that descends with the formation
+ * exactly like a Brick, but carries no HP: a single touch from a
+ * projectile Ball collects it (bonus score, no bounce-damage bookkeeping)
+ * and it never triggers Game Over — reaching the bottom just loses it.
+ */
+export interface RedBonusBall {
+  row: number;
+  col: number;
+}
+
 export type SwipeBrickBreakerPhase = "ready" | "aiming" | "volley" | "gameOver";
 
 export interface SwipeBrickBreakerState {
@@ -83,6 +100,7 @@ export interface SwipeBrickBreakerState {
   ballCount: number;
   score: number;
   bricks: Brick[];
+  redBonusBalls: RedBonusBall[];
   balls: Ball[];
   /** Radians from straight up, clamped to +/-MAX_AIM_RADIANS. Only meaningful while phase === "aiming". */
   aimAngleRad: number;
@@ -97,4 +115,5 @@ export type SwipeBrickBreakerInput =
 export interface SwipeBrickBreakerResultMetadata {
   level: number;
   bricksDestroyed: number;
+  redBonusBallsCollected: number;
 }

@@ -1,6 +1,6 @@
 import type { Game, GameMetadata, GameResult } from "../../types";
 import type { Clock } from "../reaction-test/types";
-import { generateBricks } from "./bricks";
+import { generateFormation } from "./bricks";
 import { stepBalls } from "./physics";
 import {
   BALL_RADIUS,
@@ -82,6 +82,7 @@ export class SwipeBrickBreakerGame
 {
   readonly metadata = swipeBrickBreakerMetadata;
   private bricksDestroyed = 0;
+  private redBonusBallsCollected = 0;
 
   constructor(
     private readonly clock: Clock,
@@ -95,6 +96,7 @@ export class SwipeBrickBreakerGame
       ballCount: 0,
       score: 0,
       bricks: [],
+      redBonusBalls: [],
       balls: [],
       aimAngleRad: 0,
     };
@@ -103,13 +105,16 @@ export class SwipeBrickBreakerGame
   /** ready -> playing: build the level 1 board. */
   start(state: SwipeBrickBreakerState): SwipeBrickBreakerState {
     this.bricksDestroyed = 0;
+    this.redBonusBallsCollected = 0;
+    const formation = generateFormation(1, this.random);
     return {
       ...state,
       phase: "ready",
       level: 1,
       ballCount: 1,
       score: 0,
-      bricks: generateBricks(1, this.random),
+      bricks: formation.bricks,
+      redBonusBalls: formation.redBonusBalls,
       balls: [],
       aimAngleRad: 0,
     };
@@ -169,7 +174,12 @@ export class SwipeBrickBreakerGame
       return state;
     }
 
-    const { balls, bricks, hits } = stepBalls(state.balls, state.bricks, dtMs / 1000);
+    const { balls, bricks, redBonusBalls, hits, collected } = stepBalls(
+      state.balls,
+      state.bricks,
+      state.redBonusBalls,
+      dtMs / 1000,
+    );
 
     let scoreDelta = 0;
     for (const hit of hits) {
@@ -179,31 +189,55 @@ export class SwipeBrickBreakerGame
         this.bricksDestroyed += 1;
       }
     }
+    for (const _collectedBall of collected) {
+      scoreDelta += 30 + state.level * 2;
+      this.redBonusBallsCollected += 1;
+    }
 
     const volleyOver = balls.every((b) => !b.active);
     if (!volleyOver) {
-      return { ...state, balls, bricks, score: state.score + scoreDelta };
+      return { ...state, balls, bricks, redBonusBalls, score: state.score + scoreDelta };
     }
 
-    return this.resolveTurn({ ...state, balls: [], bricks, score: state.score + scoreDelta });
+    return this.resolveTurn({ ...state, balls: [], bricks, redBonusBalls, score: state.score + scoreDelta });
   }
 
-  /** Shifts surviving bricks down a row, checks for game over, and — if the game continues — spawns the next level's board. */
+  /**
+   * One-row descent, per the final formation-movement rule: every
+   * surviving brick and red bonus ball moves down EXACTLY one logical
+   * row — never two, never skipped. Row 0 is a permanent empty buffer:
+   * the new formation (bricks and, rarely, a red bonus ball) always
+   * spawns starting at row 1, never row 0. Game Over is triggered only
+   * by a BRICK crossing the bottom boundary (row >= BOARD_ROWS); a red
+   * bonus ball reaching the same boundary is simply lost (filtered out)
+   * and never ends the game.
+   */
   private resolveTurn(state: SwipeBrickBreakerState): SwipeBrickBreakerState {
     const shiftedBricks = state.bricks.map((b) => ({ ...b, row: b.row + 1 }));
+    const shiftedRedBonusBalls = state.redBonusBalls
+      .map((r) => ({ ...r, row: r.row + 1 }))
+      .filter((r) => r.row < BOARD_ROWS);
+
     const gameOver = shiftedBricks.some((b) => b.row >= BOARD_ROWS);
     if (gameOver) {
-      return { ...state, phase: "gameOver", bricks: shiftedBricks, aimAngleRad: 0 };
+      return {
+        ...state,
+        phase: "gameOver",
+        bricks: shiftedBricks,
+        redBonusBalls: shiftedRedBonusBalls,
+        aimAngleRad: 0,
+      };
     }
 
     const nextLevel = state.level + 1;
-    const newBricks = generateBricks(nextLevel, this.random);
+    const formation = generateFormation(nextLevel, this.random);
     return {
       ...state,
       phase: "ready",
       level: nextLevel,
       ballCount: nextLevel,
-      bricks: [...shiftedBricks, ...newBricks],
+      bricks: [...shiftedBricks, ...formation.bricks],
+      redBonusBalls: [...shiftedRedBonusBalls, ...formation.redBonusBalls],
       aimAngleRad: 0,
     };
   }
@@ -224,6 +258,7 @@ export class SwipeBrickBreakerGame
       metadata: {
         level: state.level,
         bricksDestroyed: this.bricksDestroyed,
+        redBonusBallsCollected: this.redBonusBallsCollected,
       },
     };
   }

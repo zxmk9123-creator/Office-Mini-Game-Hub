@@ -1,8 +1,11 @@
 import {
   BOARD_COLS,
+  FORMATION_TOP_ROW,
   MAX_NEW_BRICKS_PER_TURN,
+  RED_BONUS_BALL_SPAWN_CHANCE,
   type Brick,
   type RandomSource,
+  type RedBonusBall,
 } from "./types";
 
 /**
@@ -26,12 +29,12 @@ export function newBrickCountForLevel(level: number, random: RandomSource): numb
 }
 
 /**
- * Generates a sparse batch of new bricks for row 0 (the top of the brick
- * grid) — always safe with respect to the bottom "danger" row since row 0
- * can never be the bottom row. Existing bricks are only ever shifted
- * downward by the caller before this runs, so row 0 is always empty of
+ * Generates a sparse batch of new bricks for row FORMATION_TOP_ROW (the
+ * top of the *active* formation area — row 0 is a permanent empty buffer
+ * and never receives anything). Existing bricks are only ever shifted
+ * downward by the caller before this runs, so this row is always empty of
  * old bricks; this only needs to avoid placing two new bricks on the same
- * column.
+ * column. Never more than MAX_NEW_BRICKS_PER_TURN.
  */
 export function generateBricks(level: number, random: RandomSource): Brick[] {
   const count = Math.min(BOARD_COLS, newBrickCountForLevel(level, random));
@@ -44,5 +47,30 @@ export function generateBricks(level: number, random: RandomSource): Brick[] {
     chosenCols.push(availableCols.splice(pickIndex, 1)[0]);
   }
 
-  return chosenCols.map((col) => ({ row: 0, col, hp, maxHp: hp }));
+  return chosenCols.map((col) => ({ row: FORMATION_TOP_ROW, col, hp, maxHp: hp }));
+}
+
+/**
+ * Generates this turn's full new formation — bricks and (rarely) a red
+ * bonus ball — as one call, so the two never collide: the bonus ball, if
+ * any, only ever picks from columns the bricks didn't already take.
+ * Bricks are capped at MAX_NEW_BRICKS_PER_TURN; the red bonus ball is
+ * entirely separate from that cap (0 or 1 per turn, never counted against
+ * it). Both always spawn at FORMATION_TOP_ROW — row 0 stays empty.
+ */
+export function generateFormation(
+  level: number,
+  random: RandomSource,
+): { bricks: Brick[]; redBonusBalls: RedBonusBall[] } {
+  const bricks = generateBricks(level, random);
+  const takenCols = new Set(bricks.map((b) => b.col));
+  const remainingCols = Array.from({ length: BOARD_COLS }, (_, i) => i).filter((c) => !takenCols.has(c));
+
+  const redBonusBalls: RedBonusBall[] = [];
+  if (remainingCols.length > 0 && random.next() < RED_BONUS_BALL_SPAWN_CHANCE) {
+    const col = remainingCols[Math.floor(random.next() * remainingCols.length)];
+    redBonusBalls.push({ row: FORMATION_TOP_ROW, col });
+  }
+
+  return { bricks, redBonusBalls };
 }

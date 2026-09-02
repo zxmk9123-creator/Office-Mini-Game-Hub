@@ -1,5 +1,5 @@
 export { SwipeBrickBreakerGame, SwipeBrickBreakerInputError, swipeBrickBreakerMetadata } from "./swipe-brick-breaker";
-export { generateBricks, brickHpForLevel, newBrickCountForLevel } from "./bricks";
+export { generateBricks, generateFormation, brickHpForLevel, newBrickCountForLevel } from "./bricks";
 export { stepBalls, type BrickHitEvent, type StepResult } from "./physics";
 export {
   MathRandomSource,
@@ -9,6 +9,8 @@ export {
   BOARD_HEIGHT,
   LAUNCH_MARGIN_ROWS,
   BRICK_TOP_MARGIN_ROWS,
+  FORMATION_TOP_ROW,
+  RED_BONUS_BALL_SPAWN_CHANCE,
   colToX,
   rowToY,
   BALL_RADIUS,
@@ -20,6 +22,7 @@ export {
   type RandomSource,
   type Brick,
   type Ball,
+  type RedBonusBall,
   type SwipeBrickBreakerPhase,
   type SwipeBrickBreakerState,
   type SwipeBrickBreakerInput,

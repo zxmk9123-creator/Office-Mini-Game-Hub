@@ -1,4 +1,4 @@
-import { BOARD_HEIGHT, BOARD_WIDTH, colToX, rowToY, type Ball, type Brick } from "./types";
+import { BOARD_HEIGHT, BOARD_WIDTH, colToX, rowToY, type Ball, type Brick, type RedBonusBall } from "./types";
 
 export interface BrickHitEvent {
   brick: Brick;
@@ -8,7 +8,10 @@ export interface BrickHitEvent {
 export interface StepResult {
   balls: Ball[];
   bricks: Brick[];
+  redBonusBalls: RedBonusBall[];
   hits: BrickHitEvent[];
+  /** Red bonus balls collected (touched by a projectile ball) this step. */
+  collected: RedBonusBall[];
 }
 
 function reflect(vx: number, vy: number, nx: number, ny: number): [number, number] {
@@ -45,11 +48,17 @@ function enforceMinimumVerticalVelocity(vx: number, vy: number): [number, number
   return [vxSign * remainingSpeed, newVy];
 }
 
-/** Resolves one active ball against one brick's axis-aligned cell rect (circle-vs-rect). Mutates nothing — returns the updated ball, or null if there was no collision. */
-function resolveBrickCollision(ball: Ball, brick: Brick): Ball | null {
-  const left = colToX(brick.col);
+interface CellCollision {
+  nx: number;
+  ny: number;
+  penetration: number;
+}
+
+/** Circle-vs-axis-aligned-cell-rect test/resolution, shared by bricks and red bonus balls (both occupy exactly one grid cell). Returns null if there's no overlap. */
+function circleVsCell(ball: Ball, row: number, col: number): CellCollision | null {
+  const left = colToX(col);
   const right = left + 1;
-  const top = rowToY(brick.row);
+  const top = rowToY(row);
   const bottom = top + 1;
 
   const closestX = Math.min(Math.max(ball.x, left), right);
@@ -67,29 +76,39 @@ function resolveBrickCollision(ball: Ball, brick: Brick): Ball | null {
   // straight back the way it came so it can never get stuck.
   const nx = dist > 1e-6 ? dx / dist : 0;
   const ny = dist > 1e-6 ? dy / dist : -1;
-  const penetration = ball.radius - dist;
+  return { nx, ny, penetration: ball.radius - dist };
+}
 
-  const [vx, vy] = reflect(ball.vx, ball.vy, nx, ny);
+function applyCollision(ball: Ball, collision: CellCollision): Ball {
+  const [vx, vy] = reflect(ball.vx, ball.vy, collision.nx, collision.ny);
   return {
     ...ball,
-    x: ball.x + nx * penetration,
-    y: ball.y + ny * penetration,
+    x: ball.x + collision.nx * collision.penetration,
+    y: ball.y + collision.ny * collision.penetration,
     vx,
     vy,
   };
 }
 
 /**
- * Advances all active balls by `dtSeconds`, resolving wall and brick
- * collisions. A ball damages at most one brick per call (no double
- * damage within a single frame), and is deactivated ("returned") once it
- * fully passes below the board — the arcade equivalent of falling back
- * into the player's hand. Pure and deterministic: same inputs always
- * produce the same outputs.
+ * Advances all active balls by `dtSeconds`, resolving wall, brick, and
+ * red-bonus-ball collisions. A ball resolves at most one collision (brick
+ * OR red bonus ball) per call — no double damage/collection within a
+ * single frame — and is deactivated ("returned") once it fully passes
+ * below the board — the arcade equivalent of falling back into the
+ * player's hand. Pure and deterministic: same inputs always produce the
+ * same outputs.
  */
-export function stepBalls(balls: Ball[], bricks: Brick[], dtSeconds: number): StepResult {
+export function stepBalls(
+  balls: Ball[],
+  bricks: Brick[],
+  redBonusBalls: RedBonusBall[],
+  dtSeconds: number,
+): StepResult {
   const hits: BrickHitEvent[] = [];
+  const collected: RedBonusBall[] = [];
   let remainingBricks = bricks;
+  let remainingRedBalls = redBonusBalls;
 
   const nextBalls = balls.map((original) => {
     if (!original.active) {
@@ -120,20 +139,35 @@ export function stepBalls(balls: Ball[], bricks: Brick[], dtSeconds: number): St
     }
 
     // At most one brick collision per ball per tick.
+    let collidedThisTick = false;
     for (const brick of remainingBricks) {
       if (brick.hp <= 0) {
         continue;
       }
-      const resolved = resolveBrickCollision(ball, brick);
-      if (!resolved) {
+      const collision = circleVsCell(ball, brick.row, brick.col);
+      if (!collision) {
         continue;
       }
-      ball = resolved;
+      ball = applyCollision(ball, collision);
       const hp = brick.hp - 1;
       const updatedBrick: Brick = { ...brick, hp };
       remainingBricks = remainingBricks.map((b) => (b === brick ? updatedBrick : b));
       hits.push({ brick: updatedBrick, destroyed: hp <= 0 });
+      collidedThisTick = true;
       break;
+    }
+
+    if (!collidedThisTick) {
+      for (const redBall of remainingRedBalls) {
+        const collision = circleVsCell(ball, redBall.row, redBall.col);
+        if (!collision) {
+          continue;
+        }
+        ball = applyCollision(ball, collision);
+        remainingRedBalls = remainingRedBalls.filter((r) => r !== redBall);
+        collected.push(redBall);
+        break;
+      }
     }
 
     const [vx, vy] = enforceMinimumVerticalVelocity(ball.vx, ball.vy);
@@ -143,6 +177,8 @@ export function stepBalls(balls: Ball[], bricks: Brick[], dtSeconds: number): St
   return {
     balls: nextBalls,
     bricks: remainingBricks.filter((b) => b.hp > 0),
+    redBonusBalls: remainingRedBalls,
     hits,
+    collected,
   };
 }

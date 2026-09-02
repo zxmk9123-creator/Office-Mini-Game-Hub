@@ -87,6 +87,24 @@ export function drawBoard(
     ctx.fillText(String(brick.hp), x + size / 2, y + size / 2 + 1);
   }
 
+  // Red bonus balls — the one deliberate accent color against the
+  // otherwise muted palette, since "red" is the object's own identity
+  // here (per spec), not a decorative flourish.
+  for (const redBall of state.redBonusBalls) {
+    const x = colToX(redBall.col) * scale;
+    const y = rowToY(redBall.row) * scale;
+    const size = scale;
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+    const radius = size * 0.36;
+    ctx.fillStyle = "#dc2626";
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fef2f2";
+    ctx.fillText("R", cx, cy + 1);
+  }
+
   // Launch point.
   const launchXPx = LAUNCH_X * scale;
   const launchYPx = LAUNCH_Y * scale;
