@@ -83,3 +83,31 @@ export function submitGameResult(gameId: string, payload: SubmitResultPayload): 
     body: JSON.stringify(payload),
   });
 }
+
+export interface RankingEntryDto {
+  rank: number;
+  playerId: string;
+  nickname: string;
+  score: number;
+  metadata: unknown;
+  completedAt: string;
+}
+
+export interface RankingDto {
+  game: { id: string; name: string; scoreType: "lower_is_better" | "higher_is_better" };
+  entries: RankingEntryDto[];
+  pagination: { limit: number; offset: number; total: number };
+  playerRank?: RankingEntryDto | null;
+}
+
+export function getRanking(
+  gameId: string,
+  options?: { limit?: number; offset?: number; playerId?: string },
+): Promise<RankingDto> {
+  const params = new URLSearchParams();
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
+  if (options?.playerId) params.set("playerId", options.playerId);
+  const qs = params.toString();
+  return request<RankingDto>(`/games/${gameId}/ranking${qs ? `?${qs}` : ""}`);
+}

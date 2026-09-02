@@ -8,6 +8,29 @@ import { ensureGamesSynced, resetTestData } from "./testDb";
 // A second, real, *enabled* game — only registered so the "wrong game" test
 // below has a distinct, enabled game to submit against (an already-disabled
 // game would fail the enabled check before the mismatch check ever runs).
+const disabledGame: Game = {
+  metadata: {
+    id: "disabled-api-game",
+    name: "Disabled API Game",
+    description: "Test double used only to prove the ranking API rejects disabled games.",
+    icon: "disabled",
+    scoreType: "lower_is_better",
+    version: "1.0.0",
+    enabled: false,
+  },
+  createInitialState: () => ({}),
+  start: (state) => state,
+  handleInput: (state) => state,
+  isFinished: () => true,
+  computeResult: () => ({
+    gameId: "disabled-api-game",
+    scoreType: "lower_is_better",
+    score: 0,
+    completion: { reason: "completed", completedAt: 0 },
+    metadata: {},
+  }),
+};
+
 const secondEnabledGame: Game = {
   metadata: {
     id: "second-enabled-game",
@@ -35,6 +58,9 @@ beforeAll(async () => {
   const gameRegistry = getGameRegistry();
   if (!gameRegistry.has("second-enabled-game")) {
     gameRegistry.register(secondEnabledGame);
+  }
+  if (!gameRegistry.has("disabled-api-game")) {
+    gameRegistry.register(disabledGame);
   }
   await ensureGamesSynced();
 });
@@ -295,6 +321,74 @@ describe("POST /api/games/:gameId/results", () => {
       });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe("invalid_result");
+  });
+});
+
+async function submitResult(sessionId: string, score: number, gameId = "reaction-test") {
+  return request(app)
+    .post(`/api/games/${gameId}/results`)
+    .send({ sessionId, score, completion: { reason: "completed", completedAt: 1 }, metadata: {} });
+}
+
+describe("GET /api/games/:gameId/ranking", () => {
+  it("returns the correct response shape for a valid game", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+    await submitResult(session.id, 237);
+
+    const res = await request(app).get("/api/games/reaction-test/ranking");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      game: { id: "reaction-test", scoreType: "lower_is_better" },
+      entries: [{ rank: 1, playerId: player.id, nickname: player.nickname, score: 237 }],
+      pagination: { limit: 20, offset: 0, total: 1 },
+    });
+  });
+
+  it("returns 404 for a nonexistent game", async () => {
+    const res = await request(app).get("/api/games/does-not-exist/ranking");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("game_not_found");
+  });
+
+  it("returns 409 for a disabled game", async () => {
+    const res = await request(app).get("/api/games/disabled-api-game/ranking");
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("game_disabled");
+  });
+
+  it("returns 400 for an invalid limit", async () => {
+    const res = await request(app).get("/api/games/reaction-test/ranking?limit=0");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
+  it("returns 400 for a limit above the cap", async () => {
+    const res = await request(app).get("/api/games/reaction-test/ranking?limit=101");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
+  it("returns 400 for a negative offset", async () => {
+    const res = await request(app).get("/api/games/reaction-test/ranking?offset=-1");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_error");
+  });
+
+  it("defaults limit/offset when omitted", async () => {
+    const res = await request(app).get("/api/games/reaction-test/ranking");
+    expect(res.status).toBe(200);
+    expect(res.body.pagination).toMatchObject({ limit: 20, offset: 0 });
+  });
+
+  it("includes playerRank when playerId is supplied", async () => {
+    const player = await createPlayer();
+    const session = await createSession(player.id);
+    await submitResult(session.id, 237);
+
+    const res = await request(app).get(`/api/games/reaction-test/ranking?playerId=${player.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.playerRank).toMatchObject({ rank: 1, playerId: player.id, score: 237 });
   });
 });
 

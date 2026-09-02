@@ -49,21 +49,30 @@ export const gameSessions = pgTable(
   ],
 );
 
-export const gameResults = pgTable("game_results", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  // unique: a session represents exactly one attempt, so it may have at
-  // most one result — enforced here, not just in application code, so a
-  // race between two concurrent submissions can't create two rows.
-  sessionId: uuid("session_id")
-    .notNull()
-    .unique()
-    .references(() => gameSessions.id),
-  playerId: uuid("player_id").notNull().references(() => players.id),
-  gameId: text("game_id").notNull().references(() => games.id),
-  // A generic score, not necessarily a whole number — e.g. Reaction Test's
-  // score comes from performance.now() deltas, which are sub-millisecond
-  // floats (376.09999999403954), not integers.
-  score: doublePrecision("score"),
-  metadata: jsonb("metadata").notNull().default({}),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const gameResults = pgTable(
+  "game_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // unique: a session represents exactly one attempt, so it may have at
+    // most one result — enforced here, not just in application code, so a
+    // race between two concurrent submissions can't create two rows.
+    sessionId: uuid("session_id")
+      .notNull()
+      .unique()
+      .references(() => gameSessions.id),
+    playerId: uuid("player_id").notNull().references(() => players.id),
+    gameId: text("game_id").notNull().references(() => games.id),
+    // A generic score, not necessarily a whole number — e.g. Reaction Test's
+    // score comes from performance.now() deltas, which are sub-millisecond
+    // floats (376.09999999403954), not integers.
+    score: doublePrecision("score"),
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    // The ranking query always filters by game_id first (WHERE game_id = $1
+    // before reducing to best-per-player) — this is the one access pattern
+    // that justifies an index here.
+    index("game_results_game_id_idx").on(table.gameId),
+  ],
+);

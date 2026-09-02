@@ -5,19 +5,18 @@
 
 ## Status
 
-**Phase 6 — Render 배포 준비** 완료 (코드/설정까지; 실제 Render 프로비저닝은 계정 소유자가 진행).
+**Phase 7 — Ranking System** 완료. https://mini-game-hub-web.onrender.com 에 실제 배포되어 있다.
 
 - Phase 1: 모노레포 뼈대, 빌드 도구 체인, DB 스키마 초안
 - Phase 2: 프레임워크에 종속되지 않는 Game Core (Game 계약, 플랫폼 라이프사이클, GameRegistry, Mock Game)
 - Phase 3: Reaction Test 게임 엔진 + React 프레젠테이션
 - Phase 4: Player / GameSession 도메인, REST API, GameRegistry와 연동된 세션 생성
 - Phase 5: GameResult 영속화(GameResultService), 세션↔결과 무결성(중복 제출 방지), 트랜잭션 원자성, Reaction Test ↔ 결과 API 연동
-- Phase 6: Render 배포용 설정 — `render.yaml`, 관리형 Postgres용 SSL 처리, `0.0.0.0` 바인딩, graceful shutdown,
-  환경변수 기반 CORS/`VITE_API_BASE_URL` (Phase 5에서 이미 구현)
+- Phase 6: Render 배포 — `render.yaml`, 관리형 Postgres용 SSL 처리, `0.0.0.0` 바인딩, graceful shutdown,
+  부팅 시 자동 마이그레이션, 환경변수 기반 CORS/`VITE_API_BASE_URL`
+- Phase 7: 게임 공통 랭킹 시스템 — `RankingService`, best-score/동점 처리, 페이지네이션, 리더보드 UI
 
-랭킹, 인증, 리더보드 UI, 안티치트는 아직 구현하지 않았다. **실제 Render 서비스 생성·배포·프로덕션 E2E 검증은
-이 세션에 Render 계정 접근 권한이 없어 수행하지 못했다** — 아래 "Render deployment"의 순서대로 계정 소유자가 직접
-진행해야 한다.
+인증, 안티치트는 아직 구현하지 않았다.
 
 ## Structure
 
@@ -105,8 +104,9 @@ resolves:
 ### Redeployment
 
 Render redeploys automatically on push to the connected branch (or trigger manually from the
-dashboard). A schema change needs its migration applied to the Render database the same way as
-step 3 above — migrations are not run automatically on deploy in this setup.
+dashboard). Schema migrations run automatically as the first step of the API's own start command
+(`npm run start` → `drizzle-kit migrate` → server boot), so a schema change just needs a normal
+deploy — no separate manual migration step.
 
 ## API
 
@@ -117,8 +117,30 @@ POST /api/games/:gameId/sessions  { playerId } -> 201 GameSession | 404 (player/
 GET  /api/sessions/:id            -> 200 GameSession | 404
 POST /api/games/:gameId/results   { sessionId, score, completion, metadata }
                                    -> 201 GameResult | 404 (session/game) | 409 (terminal/duplicate) | 422 (invalid result)
+GET  /api/games/:gameId/ranking   ?limit=20&offset=0&playerId=...
+                                   -> 200 { game, entries, pagination, playerRank? } | 404 (game) | 409 (disabled game) | 400 (bad limit/offset)
 GET  /api/health                  -> 200 { status: "ok" }
 ```
+
+## Ranking
+
+Generic — `RankingService` never branches on a game id, only on `GameMetadata.scoreType`. Adding a
+future game requires no ranking code changes, only registering it (see `gameRegistry.ts`).
+
+- **Score direction**: `lower_is_better` sorts ascending (e.g. Reaction Test, ms); `higher_is_better`
+  sorts descending.
+- **Best score only**: a player may have many completed attempts; the leaderboard keeps their single
+  best (`MIN`/`MAX` per `scoreType`) — a player appears at most once. Computed in Postgres (window
+  function + `DISTINCT ON`), never by loading every result into Node.
+- **Eligibility**: only results from `game_sessions.status = 'completed'` with a non-null score count.
+  Invalid (false-start) results, abandoned sessions, and null scores are excluded — derived from the
+  persisted relational data, not trusted from the request.
+- **Ties**: standard competition ranking (`1, 2, 2, 4`, not `1, 2, 2, 3`). Equal scores are then
+  ordered deterministically by `completedAt` (earlier first), then by result id.
+- **Pagination**: `limit` 1–100 (default 20), `offset` ≥ 0 (default 0); response includes `total`.
+- **Personal rank**: pass `?playerId=<uuid>` to also get that player's own best/rank in the response
+  (`playerRank`), independent of the current page — a display convenience, not an auth mechanism
+  (there is no login).
 
 ## Stack
 

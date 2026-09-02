@@ -1,5 +1,8 @@
 import { usePlayerId } from "../../player/usePlayerId";
+import { Leaderboard } from "./Leaderboard";
 import { useReactionTestSession } from "./useReactionTestSession";
+
+const GAME_ID = "reaction-test";
 
 function SubmissionStatusLine({ status }: { status: "idle" | "saving" | "saved" | "error" }) {
   if (status === "saving") {
@@ -23,7 +26,7 @@ function SubmissionStatusLine({ status }: { status: "idle" | "saving" | "saved" 
  */
 export function ReactionTestView() {
   const playerId = usePlayerId();
-  const { lifecycleState, phase, result, submissionStatus, starting, start, click, reset } =
+  const { lifecycleState, phase, result, submissionStatus, persistedResult, starting, start, click, reset } =
     useReactionTestSession(playerId);
 
   if (!playerId || lifecycleState === "idle") {
@@ -110,6 +113,11 @@ export function ReactionTestView() {
             Reset
           </button>
         </div>
+        {submissionStatus === "saved" && persistedResult && (
+          <div className="mt-4 w-full border-t border-neutral-100 pt-3">
+            <Leaderboard gameId={GAME_ID} playerId={playerId} refreshKey={persistedResult.id} />
+          </div>
+        )}
       </div>
     );
   }

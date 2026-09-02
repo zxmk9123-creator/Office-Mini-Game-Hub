@@ -7,9 +7,12 @@ import { DrizzleGameSessionRepository } from "./repositories/gameSessionReposito
 import { PlayerService } from "./services/playerService";
 import { GameSessionService } from "./services/gameSessionService";
 import { GameResultService } from "./services/gameResultService";
+import { RankingService } from "./services/rankingService";
+import { DrizzleRankingRepository } from "./repositories/rankingRepository";
 import { createPlayersRouter } from "./routes/players";
 import { createSessionsRouter } from "./routes/sessions";
 import { createResultsRouter } from "./routes/results";
+import { createRankingRouter } from "./routes/ranking";
 import { errorHandler } from "./errorHandler";
 import { resolveCorsOrigins } from "./cors";
 
@@ -23,6 +26,8 @@ export function createApp(): Express {
   const playerService = new PlayerService(playerRepository);
   const sessionService = new GameSessionService(sessionRepository, playerRepository, gameRegistry);
   const resultService = new GameResultService(db, gameRegistry);
+  const rankingRepository = new DrizzleRankingRepository(db);
+  const rankingService = new RankingService(rankingRepository, gameRegistry);
 
   const app = express();
   app.use(cors({ origin: resolveCorsOrigins(process.env.CORS_ORIGIN) }));
@@ -34,6 +39,7 @@ export function createApp(): Express {
   app.use("/api", createPlayersRouter(playerService));
   app.use("/api", createSessionsRouter(sessionService));
   app.use("/api", createResultsRouter(resultService));
+  app.use("/api", createRankingRouter(rankingService));
 
   app.use(errorHandler);
 
