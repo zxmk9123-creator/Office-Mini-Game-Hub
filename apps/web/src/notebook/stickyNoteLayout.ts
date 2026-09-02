@@ -60,20 +60,40 @@ export function clampSize(
 
 /**
  * Fixed vertical chrome around the content textarea — padding, the gaps
- * between rows, and the header (pin/delete) and footer (color/resize)
+ * between rows, and the header (lock/pin/delete) and footer (color/resize)
  * rows — that isn't part of the content itself. Calibrated to
  * StickyNoteCard's current markup (p-2 + gap-1.5 x2 + header/footer row
- * heights); update this if that markup's spacing changes.
+ * heights); update this if that markup's spacing changes. This is the
+ * note's "required padding" around the actual text area.
  */
 export const STICKY_NOTE_CHROME_HEIGHT = 64;
 
 /**
- * The note's rendered height: never shorter than the persisted/base
- * height (the user's manual size preference), but expanded past it when
- * the content itself needs more room than that to stay fully visible.
+ * How much vertical room is actually available for content within a note
+ * of the given base height — the base height minus the fixed chrome
+ * around it.
  */
-export function contentAwareHeight(persistedHeight: number, textareaContentHeight: number): number {
-  return Math.max(persistedHeight, textareaContentHeight + STICKY_NOTE_CHROME_HEIGHT);
+export function availableContentHeight(baseHeight: number): number {
+  return Math.max(0, baseHeight - STICKY_NOTE_CHROME_HEIGHT);
+}
+
+/**
+ * The note's rendered height. Stays exactly at the persisted/base height
+ * — the "poster" boundary — for as long as the content fits inside the
+ * area that height actually makes available; only once the content
+ * genuinely needs more room than that does the note expand, and then by
+ * exactly enough to show it, never less. This is a step function, not a
+ * continuous one: sub-threshold content changes never move the rendered
+ * height at all, so normal typing that still fits produces zero visual
+ * change. `contentRequiredHeight` is rounded up to a whole pixel first so
+ * a sub-pixel measurement reading can never nudge the result on its own.
+ */
+export function contentAwareHeight(baseHeight: number, contentRequiredHeight: number): number {
+  const requiredHeight = Math.ceil(contentRequiredHeight);
+  if (requiredHeight <= availableContentHeight(baseHeight)) {
+    return baseHeight;
+  }
+  return requiredHeight + STICKY_NOTE_CHROME_HEIGHT;
 }
 
 /** A simple deterministic cascade: note #0 at the default position, each next one nudged diagonally, wrapping. */

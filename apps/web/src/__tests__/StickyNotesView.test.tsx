@@ -540,4 +540,123 @@ describe("StickyNotesView", () => {
       expect(noteEl.style.top).toBe("60px");
     });
   });
+
+  describe("auto height: overflow-triggered expansion, not continuous growth", () => {
+    // Base height 240, chrome 64 -> available content room = 176px.
+    const BASE_NOTE = { ...NOTE_A, height: 240 };
+
+    function stubScrollHeightValue(value: number) {
+      Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+        configurable: true,
+        get: () => value,
+      });
+    }
+
+    it("stays at the base height while content is well below the available area", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(100);
+      fireEvent.change(textarea, { target: { value: "some content" } });
+      await waitFor(() => expect(noteEl.style.height).toBe("240px"));
+    });
+
+    it("stays at the base height right up to the boundary (content == available height)", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(176); // exactly the available room (240 - 64)
+      fireEvent.change(textarea, { target: { value: "boundary content" } });
+      await waitFor(() => expect(noteEl.style.height).toBe("240px"));
+    });
+
+    it("expands as soon as content exceeds the available height by even one pixel", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(177); // one pixel past the 176px available room
+      fireEvent.change(textarea, { target: { value: "just over the line" } });
+      await waitFor(() => expect(noteEl.style.height).toBe("241px")); // 177 + 64 chrome
+    });
+
+    it("remains large enough to show further content without clipping", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(300);
+      fireEvent.change(textarea, { target: { value: "x".repeat(400) } });
+      await waitFor(() => expect(noteEl.style.height).toBe("364px")); // 300 + 64 chrome
+    });
+
+    it("returns to the base height once content is deleted back under the boundary", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(300);
+      fireEvent.change(textarea, { target: { value: "x".repeat(400) } });
+      await waitFor(() => expect(noteEl.style.height).toBe("364px"));
+
+      stubScrollHeightValue(50);
+      fireEvent.change(textarea, { target: { value: "short" } });
+      await waitFor(() => expect(noteEl.style.height).toBe("240px"));
+    });
+
+    it("never changes width, whether content fits or overflows", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(300);
+      fireEvent.change(textarea, { target: { value: "x".repeat(400) } });
+      await waitFor(() => expect(noteEl.style.height).toBe("364px"));
+      expect(noteEl.style.width).toBe("200px");
+    });
+
+    it("never sends a persistence request purely from an overflow-triggered expansion", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      render(<StickyNotesView />);
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(300);
+      fireEvent.change(textarea, { target: { value: "x".repeat(400) } });
+      await waitFor(() => expect(screen.getByTestId("sticky-note-s1").style.height).toBe("364px"));
+
+      expect(mockedUpdateStickyNote).not.toHaveBeenCalled();
+    });
+
+    it("manual resize still updates the persisted base height that auto height expands from", async () => {
+      mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...BASE_NOTE, width: 240, height: 280 });
+      render(<StickyNotesView />);
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 340 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 380 });
+      firePointer(handle, "pointerup", { clientX: 340, clientY: 380 });
+
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { width: 240, height: 280 }));
+    });
+
+    it("auto height still expands for overflowing content while the note is locked", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...BASE_NOTE, locked: true }]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+
+      stubScrollHeightValue(300);
+      fireEvent.change(textarea, { target: { value: "x".repeat(400) } });
+      await waitFor(() => expect(noteEl.style.height).toBe("364px"));
+    });
+  });
 });

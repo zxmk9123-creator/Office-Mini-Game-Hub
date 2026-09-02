@@ -98,10 +98,12 @@ function StickyNoteCard({
   const persistedPosition = clampPosition(note.x, note.y, viewportWidth, viewportHeight);
   const position = dragPosition ?? persistedPosition;
   const size = resizeSize ?? { width: note.width, height: note.height };
-  // Auto-expand past the persisted/dragged height when the content itself
-  // needs more room, without ever overwriting that persisted height — a
-  // purely visual overlay recomputed from the textarea's own natural
-  // content size (never from an API response, never sent to the server).
+  // Step function, not a continuous one: stays exactly at the persisted/
+  // dragged base height while the content still fits inside it, and only
+  // expands once the content genuinely needs more room — never overwrites
+  // that base height. A purely visual overlay recomputed from the
+  // textarea's own natural content size (never from an API response,
+  // never sent to the server, unaffected by the note's locked state).
   const renderHeight = contentAwareHeight(size.height, textareaContentHeight);
 
   // Measures how tall the textarea's content actually needs to be, using
