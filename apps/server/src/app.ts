@@ -35,7 +35,7 @@ export function createApp(): Express {
   const rankingRepository = new DrizzleRankingRepository(db);
   const rankingService = new RankingService(rankingRepository, gameRegistry);
   const noteService = new NoteService(new DrizzleNoteRepository(db));
-  const stickyNoteService = new StickyNoteService(new DrizzleStickyNoteRepository(db));
+  const stickyNoteService = new StickyNoteService(new DrizzleStickyNoteRepository(db), playerRepository);
 
   const app = express();
   app.use(cors({ origin: resolveCorsOrigins(process.env.CORS_ORIGIN) }));

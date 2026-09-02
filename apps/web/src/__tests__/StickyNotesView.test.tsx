@@ -3,12 +3,24 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StickyNotesView } from "../notebook/StickyNotesView";
 import { createStickyNote, deleteStickyNote, listStickyNotes, updateStickyNote } from "../api/client";
+import type { PlayerSession } from "../player/usePlayerSession";
 
 // No board to collide with unless a test explicitly renders one and points
 // this at it — jsdom's real getBoundingClientRect() always reports zeros
 // anyway, so an unset ref (never attached to a rendered node) keeps
 // collision detection a no-op for every test that isn't about it.
 const boardRef = createRef<HTMLDivElement>();
+
+// A stable, already-set player identity — most tests aren't about the
+// nickname gate itself, just about Sticky Notes once a player exists.
+const testSession: PlayerSession = {
+  playerId: "player-1",
+  nickname: "Tester",
+  submitting: false,
+  error: null,
+  setNickname: vi.fn(),
+  clearPlayer: vi.fn(),
+};
 
 vi.mock("../api/client", () => ({
   listStickyNotes: vi.fn(),
@@ -24,6 +36,7 @@ const mockedDeleteStickyNote = vi.mocked(deleteStickyNote);
 
 const NOTE_A = {
   id: "s1",
+  playerId: "player-1",
   content: "buy milk",
   color: "yellow" as const,
   pinned: false,
@@ -79,7 +92,7 @@ beforeEach(() => {
 describe("StickyNotesView", () => {
   it("shows a clean empty state when there are no sticky notes", async () => {
     mockedListStickyNotes.mockResolvedValue([]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     expect(await screen.findByText(/아직 스티커 메모가 없습니다/)).toBeTruthy();
   });
 
@@ -87,7 +100,7 @@ describe("StickyNotesView", () => {
     mockedListStickyNotes.mockResolvedValue([]);
     mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, content: "" });
 
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     await screen.findByText(/아직 스티커 메모가 없습니다/);
     fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
 
@@ -102,7 +115,7 @@ describe("StickyNotesView", () => {
 
   it("renders a note at its persisted coordinates", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
 
     const noteEl = await screen.findByTestId("sticky-note-s1");
     expect(noteEl.style.left).toBe("100px");
@@ -113,39 +126,39 @@ describe("StickyNotesView", () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
     mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, content: "buy bread" });
 
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     const textarea = await screen.findByLabelText("스티커 메모 내용");
     fireEvent.change(textarea, { target: { value: "buy bread" } });
     fireEvent.blur(textarea);
 
-    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { content: "buy bread" }));
+    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { content: "buy bread" }));
   });
 
   it("changes color via a swatch button", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
     mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, color: "blue" });
 
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     fireEvent.click(await screen.findByRole("button", { name: "파랑으로 변경" }));
 
-    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { color: "blue" }));
+    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { color: "blue" }));
   });
 
   it("deletes a sticky note", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
     mockedDeleteStickyNote.mockResolvedValue(undefined);
 
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     fireEvent.click(await screen.findByRole("button", { name: "스티커 메모 삭제" }));
 
-    await waitFor(() => expect(mockedDeleteStickyNote).toHaveBeenCalledWith("s1"));
+    await waitFor(() => expect(mockedDeleteStickyNote).toHaveBeenCalledWith("s1", "player-1"));
   });
 
   it("surfaces an error state (not a crash) when an update is rejected", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
     mockedUpdateStickyNote.mockRejectedValue(new Error("not found"));
 
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     fireEvent.click(await screen.findByRole("button", { name: "📌 고정" }));
 
     expect(await screen.findByRole("alert")).toBeTruthy();
@@ -153,19 +166,19 @@ describe("StickyNotesView", () => {
 
   it("persists across a fresh mount (fetches from the server, not local memory)", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-    const { unmount } = render(<StickyNotesView active boardRef={boardRef} />);
+    const { unmount } = render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     await screen.findByDisplayValue("buy milk");
     unmount();
 
     mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "buy milk" }]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     expect(await screen.findByDisplayValue("buy milk")).toBeTruthy();
     expect(mockedListStickyNotes).toHaveBeenCalledTimes(2);
   });
 
   it("dragging the note body updates its on-screen position", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     const noteEl = await screen.findByTestId("sticky-note-s1");
 
     firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
@@ -178,7 +191,7 @@ describe("StickyNotesView", () => {
   it("persists the final position only on pointer up, not on every pointer move", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
     mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, x: 140, y: 90 });
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     const noteEl = await screen.findByTestId("sticky-note-s1");
 
     firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
@@ -187,13 +200,13 @@ describe("StickyNotesView", () => {
     expect(mockedUpdateStickyNote).not.toHaveBeenCalled();
 
     firePointer(noteEl, "pointerup", { clientX: 140, clientY: 90 });
-    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { x: 140, y: 90 }));
+    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { x: 140, y: 90 }));
     expect(mockedUpdateStickyNote).toHaveBeenCalledTimes(1);
   });
 
   it("does not start a drag when the pointer goes down on the delete button", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     const deleteButton = await screen.findByRole("button", { name: "스티커 메모 삭제" });
     const noteEl = await screen.findByTestId("sticky-note-s1");
 
@@ -206,7 +219,7 @@ describe("StickyNotesView", () => {
 
   it("does not start a drag when the pointer goes down on the textarea", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     const textarea = await screen.findByLabelText("스티커 메모 내용");
     const noteEl = await screen.findByTestId("sticky-note-s1");
 
@@ -219,7 +232,7 @@ describe("StickyNotesView", () => {
 
   it("clamps a note's rendered position within the viewport", async () => {
     mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, x: 999999, y: -999999 }]);
-    render(<StickyNotesView active boardRef={boardRef} />);
+    render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
     const noteEl = await screen.findByTestId("sticky-note-s1");
 
     const left = Number.parseFloat(noteEl.style.left);
@@ -232,13 +245,13 @@ describe("StickyNotesView", () => {
   describe("resizing", () => {
     it("renders a resize handle for each note", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       expect(await screen.findByTestId("sticky-note-resize-s1")).toBeTruthy();
     });
 
     it("renders at its persisted width/height", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       expect(noteEl.style.width).toBe("200px");
       expect(noteEl.style.height).toBe("160px");
@@ -246,7 +259,7 @@ describe("StickyNotesView", () => {
 
     it("pointer movement on the handle changes width and height live", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -260,7 +273,7 @@ describe("StickyNotesView", () => {
     it("persists the final dimensions only on pointer up, not on every pointer move", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
       mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, width: 240, height: 200 });
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
       firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
@@ -270,14 +283,14 @@ describe("StickyNotesView", () => {
 
       firePointer(handle, "pointerup", { clientX: 340, clientY: 300 });
       await waitFor(() =>
-        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { width: 240, height: 200 }),
+        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { width: 240, height: 200 }),
       );
       expect(mockedUpdateStickyNote).toHaveBeenCalledTimes(1);
     });
 
     it("does not start a note drag when resizing", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -291,7 +304,7 @@ describe("StickyNotesView", () => {
 
     it("enforces the minimum width and height", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -305,7 +318,7 @@ describe("StickyNotesView", () => {
     it("restores the last persisted dimensions and reports an error if saving fails", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
       mockedUpdateStickyNote.mockRejectedValue(new Error("network error"));
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -324,14 +337,14 @@ describe("StickyNotesView", () => {
   describe("content-aware auto height", () => {
     it("stays at the persisted/base height for short content", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]); // "buy milk" — short
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       expect(noteEl.style.height).toBe("160px");
     });
 
     it("expands the rendered height when content requires more room than the base height", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -342,7 +355,7 @@ describe("StickyNotesView", () => {
 
     it("does not change width when content grows", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -354,7 +367,7 @@ describe("StickyNotesView", () => {
 
     it("shrinks back to the persisted/base height once long content is removed", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -367,7 +380,7 @@ describe("StickyNotesView", () => {
 
     it("does not persist an auto-expanded height (no API call from typing alone)", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
       fireEvent.change(textarea, { target: { value: "x".repeat(200) } });
@@ -379,7 +392,7 @@ describe("StickyNotesView", () => {
     it("manual resize still works when content is short", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
       mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, width: 240, height: 200 });
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -388,12 +401,12 @@ describe("StickyNotesView", () => {
       expect(noteEl.style.height).toBe("200px");
 
       firePointer(handle, "pointerup", { clientX: 340, clientY: 300 });
-      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { width: 240, height: 200 }));
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { width: 240, height: 200 }));
     });
 
     it("manual resize cannot visually shrink the note below the height its content requires", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
@@ -413,7 +426,7 @@ describe("StickyNotesView", () => {
   describe("고정 (lock) toggle", () => {
     it("does not render a padlock icon", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       await screen.findByTestId("sticky-note-s1");
 
       expect(screen.queryByText("🔒")).toBeNull();
@@ -422,7 +435,7 @@ describe("StickyNotesView", () => {
 
     it("renders exactly one 📌 고정 control", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       expect(await screen.findAllByRole("button", { name: "📌 고정" })).toHaveLength(1);
     });
 
@@ -430,7 +443,7 @@ describe("StickyNotesView", () => {
       mockedListStickyNotes.mockResolvedValue([]);
       mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, content: "" });
 
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       await screen.findByText(/아직 스티커 메모가 없습니다/);
       fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
 
@@ -445,25 +458,25 @@ describe("StickyNotesView", () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
       mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: true });
 
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       fireEvent.click(await screen.findByRole("button", { name: "📌 고정" }));
 
-      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { locked: true }));
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { locked: true }));
     });
 
     it("clicking 📌 고정 again changes fixed -> unlocked", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
       mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: false });
 
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       fireEvent.click(await screen.findByRole("button", { name: "📌 고정" }));
 
-      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { locked: false }));
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { locked: false }));
     });
 
     it("the fixed state is visually indicated via aria-pressed", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
 
       const toggle = await screen.findByRole("button", { name: "📌 고정" });
       expect(toggle.getAttribute("aria-pressed")).toBe("true");
@@ -471,7 +484,7 @@ describe("StickyNotesView", () => {
 
     it("persists the fixed state through the API (survives a fresh mount / refetch)", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
 
       const toggle = await screen.findByRole("button", { name: "📌 고정" });
       expect(toggle.getAttribute("aria-pressed")).toBe("true");
@@ -480,7 +493,7 @@ describe("StickyNotesView", () => {
 
     it("a fixed note cannot start dragging", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
 
       firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
@@ -493,7 +506,7 @@ describe("StickyNotesView", () => {
 
     it("a fixed note cannot start resizing", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -508,28 +521,28 @@ describe("StickyNotesView", () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
       mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: true, content: "still editable" });
 
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const textarea = await screen.findByLabelText("스티커 메모 내용");
       fireEvent.change(textarea, { target: { value: "still editable" } });
       fireEvent.blur(textarea);
 
       await waitFor(() =>
-        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { content: "still editable" }),
+        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { content: "still editable" }),
       );
     });
 
     it("📌 고정 remains clickable while fixed", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
       mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: false });
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
 
       fireEvent.click(await screen.findByRole("button", { name: "📌 고정" }));
-      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { locked: false }));
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { locked: false }));
     });
 
     it("clicking 📌 고정 never starts a drag", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const toggle = await screen.findByRole("button", { name: "📌 고정" });
 
@@ -542,7 +555,7 @@ describe("StickyNotesView", () => {
 
     it("clicking 📌 고정 never starts a resize", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const toggle = await screen.findByRole("button", { name: "📌 고정" });
 
@@ -555,7 +568,7 @@ describe("StickyNotesView", () => {
 
     it("unlocking restores existing drag behavior", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: false }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
 
       firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
@@ -567,7 +580,7 @@ describe("StickyNotesView", () => {
 
     it("unlocking restores existing resize behavior", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: false }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
@@ -592,7 +605,7 @@ describe("StickyNotesView", () => {
 
     it("stays at the base height while content is well below the available area", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -603,7 +616,7 @@ describe("StickyNotesView", () => {
 
     it("stays at the base height right up to the boundary (content == available height)", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -614,7 +627,7 @@ describe("StickyNotesView", () => {
 
     it("expands as soon as content exceeds the available height by even one pixel", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -625,7 +638,7 @@ describe("StickyNotesView", () => {
 
     it("remains large enough to show further content without clipping", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -636,7 +649,7 @@ describe("StickyNotesView", () => {
 
     it("returns to the base height once content is deleted back under the boundary", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -651,7 +664,7 @@ describe("StickyNotesView", () => {
 
     it("never changes width, whether content fits or overflows", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -663,7 +676,7 @@ describe("StickyNotesView", () => {
 
     it("never sends a persistence request purely from an overflow-triggered expansion", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
       stubScrollHeightValue(300);
@@ -676,19 +689,19 @@ describe("StickyNotesView", () => {
     it("manual resize still updates the persisted base height that auto height expands from", async () => {
       mockedListStickyNotes.mockResolvedValue([BASE_NOTE]);
       mockedUpdateStickyNote.mockResolvedValue({ ...BASE_NOTE, width: 240, height: 280 });
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const handle = await screen.findByTestId("sticky-note-resize-s1");
 
       firePointer(handle, "pointerdown", { clientX: 300, clientY: 340 });
       firePointer(handle, "pointermove", { clientX: 340, clientY: 380 });
       firePointer(handle, "pointerup", { clientX: 340, clientY: 380 });
 
-      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { width: 240, height: 280 }));
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { width: 240, height: 280 }));
     });
 
     it("auto height still expands for overflowing content while the note is locked", async () => {
       mockedListStickyNotes.mockResolvedValue([{ ...BASE_NOTE, locked: true }]);
-      render(<StickyNotesView active boardRef={boardRef} />);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
       const textarea = await screen.findByLabelText("스티커 메모 내용");
 
@@ -705,7 +718,7 @@ describe("StickyNotesView", () => {
       render(
         <>
           <div ref={ref} data-testid="board" />
-          <StickyNotesView active boardRef={ref} />
+          <StickyNotesView active boardRef={ref} session={testSession} />
         </>,
       );
       return ref;
@@ -758,7 +771,7 @@ describe("StickyNotesView", () => {
       expect(noteEl.style.left).toBe("120px"); // frozen at the last valid position, not moved back or forward
 
       firePointer(noteEl, "pointerup", { clientX: 350, clientY: 310 });
-      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { x: 120, y: 80 }));
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { x: 120, y: 80 }));
     });
 
     it("resumes normal movement once the candidate clears the board again", async () => {
@@ -793,7 +806,7 @@ describe("StickyNotesView", () => {
     it("does not block a drag when there is no board rect to collide with", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
       const emptyRef = createRef<HTMLDivElement>(); // never attached to a rendered node
-      render(<StickyNotesView active boardRef={emptyRef} />);
+      render(<StickyNotesView active boardRef={emptyRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
 
       firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
@@ -807,17 +820,17 @@ describe("StickyNotesView", () => {
   describe("persistence across view/tool switching", () => {
     it("never refetches or unmounts notes when the panel toggles inactive and active again", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      const { rerender } = render(<StickyNotesView active boardRef={boardRef} />);
+      const { rerender } = render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       await screen.findByTestId("sticky-note-s1");
       expect(mockedListStickyNotes).toHaveBeenCalledTimes(1);
 
       // Simulates switching to another tab: only the panel disappears.
-      rerender(<StickyNotesView active={false} boardRef={boardRef} />);
+      rerender(<StickyNotesView active={false} boardRef={boardRef} session={testSession} />);
       expect(screen.getByTestId("sticky-note-s1")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "+ 새 스티커" })).toBeNull();
 
       // Simulates switching back: the same note, no new fetch.
-      rerender(<StickyNotesView active boardRef={boardRef} />);
+      rerender(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       expect(screen.getByTestId("sticky-note-s1")).toBeTruthy();
       expect(mockedListStickyNotes).toHaveBeenCalledTimes(1);
     });
@@ -825,11 +838,11 @@ describe("StickyNotesView", () => {
     it("retains id/content/position/size/locked exactly across the toggle", async () => {
       const note = { ...NOTE_A, content: "keep me", locked: true, x: 111, y: 22, width: 210, height: 170 };
       mockedListStickyNotes.mockResolvedValue([note]);
-      const { rerender } = render(<StickyNotesView active boardRef={boardRef} />);
+      const { rerender } = render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       await screen.findByTestId("sticky-note-s1");
 
-      rerender(<StickyNotesView active={false} boardRef={boardRef} />);
-      rerender(<StickyNotesView active boardRef={boardRef} />);
+      rerender(<StickyNotesView active={false} boardRef={boardRef} session={testSession} />);
+      rerender(<StickyNotesView active boardRef={boardRef} session={testSession} />);
 
       const noteEl = screen.getByTestId("sticky-note-s1");
       expect(noteEl.style.left).toBe("111px");
@@ -841,16 +854,66 @@ describe("StickyNotesView", () => {
 
     it("a note is removed from the DOM only by an explicit delete, never by toggling active", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
-      const { rerender } = render(<StickyNotesView active boardRef={boardRef} />);
+      const { rerender } = render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       await screen.findByTestId("sticky-note-s1");
 
-      rerender(<StickyNotesView active={false} boardRef={boardRef} />);
-      rerender(<StickyNotesView active boardRef={boardRef} />);
-      rerender(<StickyNotesView active={false} boardRef={boardRef} />);
-      rerender(<StickyNotesView active boardRef={boardRef} />);
+      rerender(<StickyNotesView active={false} boardRef={boardRef} session={testSession} />);
+      rerender(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      rerender(<StickyNotesView active={false} boardRef={boardRef} session={testSession} />);
+      rerender(<StickyNotesView active boardRef={boardRef} session={testSession} />);
 
       expect(screen.getByTestId("sticky-note-s1")).toBeTruthy();
       expect(mockedDeleteStickyNote).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("player scoping (browser/player-level ownership, not authentication)", () => {
+    it("shows a nickname prompt instead of the panel when no playerId exists yet", async () => {
+      mockedListStickyNotes.mockResolvedValue([]);
+      const noSession: PlayerSession = { ...testSession, playerId: null, nickname: null };
+      render(<StickyNotesView active boardRef={boardRef} session={noSession} />);
+
+      expect(await screen.findByPlaceholderText("Your nickname")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "+ 새 스티커" })).toBeNull();
+      expect(mockedListStickyNotes).not.toHaveBeenCalled();
+    });
+
+    it("requests notes scoped to the current playerId", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+
+      await screen.findByTestId("sticky-note-s1");
+      expect(mockedListStickyNotes).toHaveBeenCalledWith("player-1");
+    });
+
+    it("sends the current playerId on create/update/delete", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, content: "x" });
+      mockedDeleteStickyNote.mockResolvedValue(undefined);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+      fireEvent.change(textarea, { target: { value: "x" } });
+      fireEvent.blur(textarea);
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { content: "x" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "스티커 메모 삭제" }));
+      await waitFor(() => expect(mockedDeleteStickyNote).toHaveBeenCalledWith("s1", "player-1"));
+    });
+
+    it("refetches and shows only the new player's notes after switching players", async () => {
+      mockedListStickyNotes.mockResolvedValueOnce([NOTE_A]);
+      const { rerender } = render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      await screen.findByTestId("sticky-note-s1");
+
+      const otherPlayerNote = { ...NOTE_A, id: "s2", playerId: "player-2", content: "player 2's note" };
+      mockedListStickyNotes.mockResolvedValueOnce([otherPlayerNote]);
+      const otherSession: PlayerSession = { ...testSession, playerId: "player-2", nickname: "Other" };
+      rerender(<StickyNotesView active boardRef={boardRef} session={otherSession} />);
+
+      await waitFor(() => expect(screen.queryByTestId("sticky-note-s1")).toBeNull());
+      expect(await screen.findByTestId("sticky-note-s2")).toBeTruthy();
+      expect(mockedListStickyNotes).toHaveBeenCalledWith("player-2");
     });
   });
 });

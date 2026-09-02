@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStickyNotes } from "./useStickyNotes";
+import { NicknameEntry } from "../player/NicknameEntry";
+import type { PlayerSession } from "../player/usePlayerSession";
 import type { StickyNoteColor, StickyNoteDto } from "../api/client";
 import { clampPosition, clampSize, contentAwareHeight, rectsIntersect } from "./stickyNoteLayout";
 
@@ -364,13 +366,24 @@ function StickyNoteCard({
  * a page reload is the only thing that ever re-fetches them from the
  * server. `boardRef` is the Main Board panel's real DOM node, measured
  * live (never hardcoded) to keep dragged notes out of it.
+ *
+ * `session` is the app's single existing `usePlayerSession()` instance
+ * (passed down, not re-created here) — its `playerId` is the anonymous,
+ * browser-local identity Sticky Notes are now scoped to, the same one
+ * Reaction Test already uses. Sticky Notes reuses the same one-time
+ * nickname gate (`NicknameEntry`) Reaction Test uses, shown only while
+ * the panel is active and no playerId exists yet — this is
+ * browser/player-level note separation, not authenticated-account
+ * security.
  */
 export function StickyNotesView({
   active,
   boardRef,
+  session,
 }: {
   active: boolean;
   boardRef: React.RefObject<HTMLDivElement>;
+  session: PlayerSession;
 }) {
   const {
     stickyNotes,
@@ -383,7 +396,7 @@ export function StickyNotesView({
     updatePosition,
     updateSize,
     remove,
-  } = useStickyNotes();
+  } = useStickyNotes(session.playerId);
   const { width: viewportWidth, height: viewportHeight } = useViewportSize();
 
   // A lightweight client-side stacking order: the most recently
@@ -425,32 +438,35 @@ export function StickyNotesView({
 
   return (
     <>
-      {active && (
-        <div className="flex h-full flex-col gap-2 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
-            <button
-              type="button"
-              onClick={() => create(viewportWidth, viewportHeight)}
-              className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
-            >
-              + 새 스티커
-            </button>
+      {active &&
+        (!session.playerId ? (
+          <NicknameEntry session={session} />
+        ) : (
+          <div className="flex h-full flex-col gap-2 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
+              <button
+                type="button"
+                onClick={() => create(viewportWidth, viewportHeight)}
+                className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
+              >
+                + 새 스티커
+              </button>
+            </div>
+            {error && (
+              <p role="alert" className="text-xs text-amber-600">
+                ⚠ {error}
+              </p>
+            )}
+            {loading ? (
+              <p className="text-xs text-neutral-400">불러오는 중…</p>
+            ) : stickyNotes.length === 0 ? (
+              <p className="text-xs text-neutral-400">아직 스티커 메모가 없습니다.</p>
+            ) : (
+              <p className="text-xs text-neutral-400">스티커 메모는 화면 주위에 자유롭게 배치할 수 있습니다.</p>
+            )}
           </div>
-          {error && (
-            <p role="alert" className="text-xs text-amber-600">
-              ⚠ {error}
-            </p>
-          )}
-          {loading ? (
-            <p className="text-xs text-neutral-400">불러오는 중…</p>
-          ) : stickyNotes.length === 0 ? (
-            <p className="text-xs text-neutral-400">아직 스티커 메모가 없습니다.</p>
-          ) : (
-            <p className="text-xs text-neutral-400">스티커 메모는 화면 주위에 자유롭게 배치할 수 있습니다.</p>
-          )}
-        </div>
-      )}
+        ))}
       {canvas}
     </>
   );

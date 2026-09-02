@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const createStickyNoteRequestSchema = z.object({
+  playerId: z.string().uuid(),
   content: z.string().default(""),
   color: z.string().optional(),
   x: z.number().finite().optional(),
@@ -10,6 +11,7 @@ export const createStickyNoteRequestSchema = z.object({
 });
 
 export const updateStickyNoteRequestSchema = z.object({
+  playerId: z.string().uuid(),
   content: z.string().optional(),
   color: z.string().optional(),
   pinned: z.boolean().optional(),
@@ -22,4 +24,9 @@ export const updateStickyNoteRequestSchema = z.object({
 
 export const stickyNoteIdParamsSchema = z.object({
   id: z.string().uuid(),
+});
+
+/** Used for GET (list) and DELETE, where `playerId` travels as a query param rather than a body field. */
+export const stickyNotePlayerIdQuerySchema = z.object({
+  playerId: z.string().uuid(),
 });

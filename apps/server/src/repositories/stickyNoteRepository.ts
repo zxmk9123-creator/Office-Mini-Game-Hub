@@ -1,8 +1,9 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { stickyNotes, type Database } from "@mini-game-hub/database";
 
 export interface StickyNoteRecord {
   id: string;
+  playerId: string | null;
   content: string;
   color: string;
   pinned: boolean;
@@ -17,6 +18,7 @@ export interface StickyNoteRecord {
 
 export interface StickyNoteRepository {
   create(input: {
+    playerId: string;
     content: string;
     color: string;
     x: number;
@@ -24,10 +26,13 @@ export interface StickyNoteRepository {
     width: number;
     height: number;
   }): Promise<StickyNoteRecord>;
-  findAll(): Promise<StickyNoteRecord[]>;
+  /** Only this player's own notes — never the full table. */
+  findAllForPlayer(playerId: string): Promise<StickyNoteRecord[]>;
   findById(id: string): Promise<StickyNoteRecord | null>;
+  /** Applies the patch only when `id` AND `playerId` both match a row; otherwise a no-op (returns null). */
   update(
     id: string,
+    playerId: string,
     input: {
       content?: string;
       color?: string;
@@ -39,13 +44,15 @@ export interface StickyNoteRepository {
       height?: number;
     },
   ): Promise<StickyNoteRecord | null>;
-  delete(id: string): Promise<boolean>;
+  /** Deletes only when `id` AND `playerId` both match a row. */
+  delete(id: string, playerId: string): Promise<boolean>;
 }
 
 export class DrizzleStickyNoteRepository implements StickyNoteRepository {
   constructor(private readonly db: Database) {}
 
   async create(input: {
+    playerId: string;
     content: string;
     color: string;
     x: number;
@@ -57,9 +64,13 @@ export class DrizzleStickyNoteRepository implements StickyNoteRepository {
     return row;
   }
 
-  async findAll(): Promise<StickyNoteRecord[]> {
+  async findAllForPlayer(playerId: string): Promise<StickyNoteRecord[]> {
     // Pinned notes surface first; within each group, most recently updated first.
-    return this.db.select().from(stickyNotes).orderBy(desc(stickyNotes.pinned), desc(stickyNotes.updatedAt));
+    return this.db
+      .select()
+      .from(stickyNotes)
+      .where(eq(stickyNotes.playerId, playerId))
+      .orderBy(desc(stickyNotes.pinned), desc(stickyNotes.updatedAt));
   }
 
   async findById(id: string): Promise<StickyNoteRecord | null> {
@@ -69,6 +80,7 @@ export class DrizzleStickyNoteRepository implements StickyNoteRepository {
 
   async update(
     id: string,
+    playerId: string,
     input: {
       content?: string;
       color?: string;
@@ -83,13 +95,16 @@ export class DrizzleStickyNoteRepository implements StickyNoteRepository {
     const [row] = await this.db
       .update(stickyNotes)
       .set({ ...input, updatedAt: new Date() })
-      .where(eq(stickyNotes.id, id))
+      .where(and(eq(stickyNotes.id, id), eq(stickyNotes.playerId, playerId)))
       .returning();
     return row ?? null;
   }
 
-  async delete(id: string): Promise<boolean> {
-    const result = await this.db.delete(stickyNotes).where(eq(stickyNotes.id, id)).returning({ id: stickyNotes.id });
+  async delete(id: string, playerId: string): Promise<boolean> {
+    const result = await this.db
+      .delete(stickyNotes)
+      .where(and(eq(stickyNotes.id, id), eq(stickyNotes.playerId, playerId)))
+      .returning({ id: stickyNotes.id });
     return result.length > 0;
   }
 }

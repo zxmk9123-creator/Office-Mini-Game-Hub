@@ -7,47 +7,76 @@ beforeEach(resetTestData);
 
 const app = createApp();
 
+async function createTestPlayer(nickname = "Player"): Promise<string> {
+  const res = await request(app).post("/api/players").send({ nickname });
+  return res.body.id as string;
+}
+
 describe("Sticky Notes API", () => {
   it("creates a sticky note with a default color and unpinned", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "Pick up dry cleaning" });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "Pick up dry cleaning" });
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ content: "Pick up dry cleaning", color: "yellow", pinned: false });
+    expect(res.body).toMatchObject({ playerId, content: "Pick up dry cleaning", color: "yellow", pinned: false });
+  });
+
+  it("rejects creating a note without a playerId", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "no owner" });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects creating a note for a playerId that doesn't exist", async () => {
+    const res = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId: "00000000-0000-0000-0000-000000000000", content: "ghost owner" });
+    expect(res.status).toBe(404);
   });
 
   it("creates a sticky note with locked defaulting to false", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "new note" });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "new note" });
     expect(res.status).toBe(201);
     expect(res.body.locked).toBe(false);
   });
 
   it("toggles locked on and off via PATCH", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "lockable" });
-    const locked = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: true });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "lockable" });
+    const locked = await request(app)
+      .patch(`/api/sticky-notes/${created.body.id}`)
+      .send({ playerId, locked: true });
     expect(locked.status).toBe(200);
     expect(locked.body.locked).toBe(true);
 
-    const unlocked = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: false });
+    const unlocked = await request(app)
+      .patch(`/api/sticky-notes/${created.body.id}`)
+      .send({ playerId, locked: false });
     expect(unlocked.status).toBe(200);
     expect(unlocked.body.locked).toBe(false);
   });
 
   it("persists locked across separate requests (survives a fresh app instance / reload)", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "lockable" });
-    await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: true });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "lockable" });
+    await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, locked: true });
 
     const reloadedApp = createApp();
-    const list = await request(reloadedApp).get("/api/sticky-notes");
+    const list = await request(reloadedApp).get("/api/sticky-notes").query({ playerId });
     expect(list.body.find((n: { id: string }) => n.id === created.body.id)).toMatchObject({ locked: true });
   });
 
   it("leaves other fields untouched when only locked is updated", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "lockable", color: "blue" });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: true });
+    const playerId = await createTestPlayer();
+    const created = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "lockable", color: "blue" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, locked: true });
     expect(res.body).toMatchObject({ content: "lockable", color: "blue", locked: true });
   });
 
   it("creates a sticky note with a default canvas position when x/y are omitted", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "no position given" });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "no position given" });
     expect(res.status).toBe(201);
     expect(typeof res.body.x).toBe("number");
     expect(typeof res.body.y).toBe("number");
@@ -56,35 +85,44 @@ describe("Sticky Notes API", () => {
   });
 
   it("creates a sticky note at an explicit x/y position and persists it", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "placed", x: 120, y: 340 });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "placed", x: 120, y: 340 });
     expect(res.status).toBe(201);
     expect(res.body.x).toBe(120);
     expect(res.body.y).toBe(340);
   });
 
   it("rejects non-finite x/y on create", async () => {
-    const nan = await request(app).post("/api/sticky-notes").send({ content: "x", x: "not-a-number", y: 0 });
+    const playerId = await createTestPlayer();
+    const nan = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "x", x: "not-a-number", y: 0 });
     expect(nan.status).toBe(400);
-    const infinite = await request(app).post("/api/sticky-notes").send({ content: "x", x: Infinity, y: 0 });
+    const infinite = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "x", x: Infinity, y: 0 });
     expect(infinite.status).toBe(400);
   });
 
   it("updates x/y and returns the new position", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "movable", x: 0, y: 0 });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ x: 250, y: 175 });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "movable", x: 0, y: 0 });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, x: 250, y: 175 });
     expect(res.status).toBe(200);
     expect(res.body.x).toBe(250);
     expect(res.body.y).toBe(175);
   });
 
   it("rejects non-finite x/y on update", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "movable" });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ x: Number.NaN });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "movable" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, x: Number.NaN });
     expect(res.status).toBe(400);
   });
 
   it("creates a sticky note with a default width/height when omitted", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "no size given" });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "no size given" });
     expect(res.status).toBe(201);
     expect(typeof res.body.width).toBe("number");
     expect(typeof res.body.height).toBe("number");
@@ -93,110 +131,212 @@ describe("Sticky Notes API", () => {
   });
 
   it("creates a sticky note at an explicit width/height and persists it", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "sized", width: 260, height: 220 });
+    const playerId = await createTestPlayer();
+    const res = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "sized", width: 260, height: 220 });
     expect(res.status).toBe(201);
     expect(res.body.width).toBe(260);
     expect(res.body.height).toBe(220);
   });
 
   it("updates width/height and returns the new dimensions", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "resizable" });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ width: 300, height: 240 });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "resizable" });
+    const res = await request(app)
+      .patch(`/api/sticky-notes/${created.body.id}`)
+      .send({ playerId, width: 300, height: 240 });
     expect(res.status).toBe(200);
     expect(res.body.width).toBe(300);
     expect(res.body.height).toBe(240);
   });
 
   it("rejects a width/height below the minimum on create", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "too small", width: 10, height: 10 });
+    const playerId = await createTestPlayer();
+    const res = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "too small", width: 10, height: 10 });
     expect(res.status).toBe(400);
   });
 
   it("rejects a width/height below the minimum on update", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "resizable" });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ width: 50 });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "resizable" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, width: 50 });
     expect(res.status).toBe(400);
   });
 
   it("rejects a non-finite or non-positive width/height", async () => {
-    const nan = await request(app).post("/api/sticky-notes").send({ content: "x", width: "not-a-number" });
+    const playerId = await createTestPlayer();
+    const nan = await request(app).post("/api/sticky-notes").send({ playerId, content: "x", width: "not-a-number" });
     expect(nan.status).toBe(400);
-    const negative = await request(app).post("/api/sticky-notes").send({ content: "x", width: -200, height: 200 });
+    const negative = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "x", width: -200, height: 200 });
     expect(negative.status).toBe(400);
-    const zero = await request(app).post("/api/sticky-notes").send({ content: "x", width: 200, height: 0 });
+    const zero = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "x", width: 200, height: 0 });
     expect(zero.status).toBe(400);
   });
 
   it("creates a sticky note with an explicit color", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "Call back", color: "blue" });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "Call back", color: "blue" });
     expect(res.status).toBe(201);
     expect(res.body.color).toBe("blue");
   });
 
   it("rejects a color outside the restrained palette", async () => {
-    const res = await request(app).post("/api/sticky-notes").send({ content: "x", color: "chartreuse" });
+    const playerId = await createTestPlayer();
+    const res = await request(app).post("/api/sticky-notes").send({ playerId, content: "x", color: "chartreuse" });
     expect(res.status).toBe(400);
   });
 
   it("lists sticky notes with pinned notes first", async () => {
-    const a = await request(app).post("/api/sticky-notes").send({ content: "A" });
-    const b = await request(app).post("/api/sticky-notes").send({ content: "B" });
-    await request(app).patch(`/api/sticky-notes/${b.body.id}`).send({ pinned: true });
+    const playerId = await createTestPlayer();
+    const a = await request(app).post("/api/sticky-notes").send({ playerId, content: "A" });
+    const b = await request(app).post("/api/sticky-notes").send({ playerId, content: "B" });
+    await request(app).patch(`/api/sticky-notes/${b.body.id}`).send({ playerId, pinned: true });
 
-    const list = await request(app).get("/api/sticky-notes");
+    const list = await request(app).get("/api/sticky-notes").query({ playerId });
     expect(list.status).toBe(200);
     expect(list.body[0].id).toBe(b.body.id);
     expect(list.body.map((n: { id: string }) => n.id)).toContain(a.body.id);
   });
 
   it("edits content", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "old" });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ content: "new" });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "old" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, content: "new" });
     expect(res.status).toBe(200);
     expect(res.body.content).toBe("new");
   });
 
   it("toggles pinned on and off", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "pin me" });
-    const pinned = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ pinned: true });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "pin me" });
+    const pinned = await request(app)
+      .patch(`/api/sticky-notes/${created.body.id}`)
+      .send({ playerId, pinned: true });
     expect(pinned.body.pinned).toBe(true);
 
-    const unpinned = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ pinned: false });
+    const unpinned = await request(app)
+      .patch(`/api/sticky-notes/${created.body.id}`)
+      .send({ playerId, pinned: false });
     expect(unpinned.body.pinned).toBe(false);
   });
 
   it("changes color", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "x", color: "yellow" });
-    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ color: "green" });
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "x", color: "yellow" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ playerId, color: "green" });
     expect(res.status).toBe(200);
     expect(res.body.color).toBe("green");
   });
 
   it("deletes a sticky note", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "delete me" });
-    const del = await request(app).delete(`/api/sticky-notes/${created.body.id}`);
+    const playerId = await createTestPlayer();
+    const created = await request(app).post("/api/sticky-notes").send({ playerId, content: "delete me" });
+    const del = await request(app).delete(`/api/sticky-notes/${created.body.id}`).query({ playerId });
     expect(del.status).toBe(204);
 
-    const list = await request(app).get("/api/sticky-notes");
+    const list = await request(app).get("/api/sticky-notes").query({ playerId });
     expect(list.body.map((n: { id: string }) => n.id)).not.toContain(created.body.id);
   });
 
   it("returns 404 when editing or deleting a missing sticky note", async () => {
+    const playerId = await createTestPlayer();
     const missingId = "00000000-0000-0000-0000-000000000000";
-    const patch = await request(app).patch(`/api/sticky-notes/${missingId}`).send({ pinned: true });
+    const patch = await request(app).patch(`/api/sticky-notes/${missingId}`).send({ playerId, pinned: true });
     expect(patch.status).toBe(404);
-    const del = await request(app).delete(`/api/sticky-notes/${missingId}`);
+    const del = await request(app).delete(`/api/sticky-notes/${missingId}`).query({ playerId });
     expect(del.status).toBe(404);
   });
 
   it("persists a sticky note across separate requests (survives a fresh app instance / reload)", async () => {
-    const created = await request(app).post("/api/sticky-notes").send({ content: "Survives reload", color: "pink" });
+    const playerId = await createTestPlayer();
+    const created = await request(app)
+      .post("/api/sticky-notes")
+      .send({ playerId, content: "Survives reload", color: "pink" });
 
     const reloadedApp = createApp();
-    const list = await request(reloadedApp).get("/api/sticky-notes");
+    const list = await request(reloadedApp).get("/api/sticky-notes").query({ playerId });
     expect(list.body.find((n: { id: string }) => n.id === created.body.id)).toMatchObject({
       content: "Survives reload",
       color: "pink",
+    });
+  });
+
+  describe("per-player ownership", () => {
+    it("Player A creates a note and can read/update/delete it", async () => {
+      const playerA = await createTestPlayer("Alice");
+      const created = await request(app).post("/api/sticky-notes").send({ playerId: playerA, content: "A's note" });
+      expect(created.status).toBe(201);
+
+      const list = await request(app).get("/api/sticky-notes").query({ playerId: playerA });
+      expect(list.body.map((n: { id: string }) => n.id)).toContain(created.body.id);
+
+      const updated = await request(app)
+        .patch(`/api/sticky-notes/${created.body.id}`)
+        .send({ playerId: playerA, content: "edited by A" });
+      expect(updated.status).toBe(200);
+      expect(updated.body.content).toBe("edited by A");
+
+      const deleted = await request(app)
+        .delete(`/api/sticky-notes/${created.body.id}`)
+        .query({ playerId: playerA });
+      expect(deleted.status).toBe(204);
+    });
+
+    it("Player B cannot see Player A's notes in the list", async () => {
+      const playerA = await createTestPlayer("Alice");
+      const playerB = await createTestPlayer("Bob");
+      await request(app).post("/api/sticky-notes").send({ playerId: playerA, content: "A's private note" });
+
+      const bList = await request(app).get("/api/sticky-notes").query({ playerId: playerB });
+      expect(bList.status).toBe(200);
+      expect(bList.body).toEqual([]);
+    });
+
+    it("Player B cannot update Player A's note, even knowing its id", async () => {
+      const playerA = await createTestPlayer("Alice");
+      const playerB = await createTestPlayer("Bob");
+      const created = await request(app).post("/api/sticky-notes").send({ playerId: playerA, content: "A's note" });
+
+      const res = await request(app)
+        .patch(`/api/sticky-notes/${created.body.id}`)
+        .send({ playerId: playerB, content: "hijacked by B" });
+      expect(res.status).toBe(404);
+
+      // Confirm A's note is untouched.
+      const aList = await request(app).get("/api/sticky-notes").query({ playerId: playerA });
+      expect(aList.body[0].content).toBe("A's note");
+    });
+
+    it("Player B cannot delete Player A's note, even knowing its id", async () => {
+      const playerA = await createTestPlayer("Alice");
+      const playerB = await createTestPlayer("Bob");
+      const created = await request(app).post("/api/sticky-notes").send({ playerId: playerA, content: "A's note" });
+
+      const res = await request(app).delete(`/api/sticky-notes/${created.body.id}`).query({ playerId: playerB });
+      expect(res.status).toBe(404);
+
+      const aList = await request(app).get("/api/sticky-notes").query({ playerId: playerA });
+      expect(aList.body.map((n: { id: string }) => n.id)).toContain(created.body.id);
+    });
+
+    it("keeps each player's notes fully separate from the other's", async () => {
+      const playerA = await createTestPlayer("Alice");
+      const playerB = await createTestPlayer("Bob");
+      await request(app).post("/api/sticky-notes").send({ playerId: playerA, content: "A1" });
+      await request(app).post("/api/sticky-notes").send({ playerId: playerA, content: "A2" });
+      await request(app).post("/api/sticky-notes").send({ playerId: playerB, content: "B1" });
+
+      const aList = await request(app).get("/api/sticky-notes").query({ playerId: playerA });
+      const bList = await request(app).get("/api/sticky-notes").query({ playerId: playerB });
+      expect(aList.body.map((n: { content: string }) => n.content).sort()).toEqual(["A1", "A2"]);
+      expect(bList.body.map((n: { content: string }) => n.content)).toEqual(["B1"]);
     });
   });
 });

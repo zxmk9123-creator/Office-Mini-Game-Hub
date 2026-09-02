@@ -57,28 +57,38 @@ export const notes = pgTable("notes", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const stickyNotes = pgTable("sticky_notes", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  content: text("content").notNull().default(""),
-  color: text("color").notNull().default("yellow"),
-  pinned: boolean("pinned").notNull().default(false),
-  // Position/size lock — when true, dragging and resizing are disabled
-  // client-side; content editing and pin/color/delete stay available.
-  // Distinct from `pinned` (which only affects list ordering).
-  locked: boolean("locked").notNull().default(false),
-  // Freeform canvas position, in canvas/viewport pixels. Defaulted so
-  // existing rows (added before the canvas layout existed) get a safe,
-  // on-screen position via this same column default.
-  x: doublePrecision("x").notNull().default(24),
-  y: doublePrecision("y").notNull().default(24),
-  // Freeform canvas size, in pixels. Defaulted so existing rows (added
-  // before resizing existed) get a sensible on-screen size via this same
-  // column default.
-  width: doublePrecision("width").notNull().default(200),
-  height: doublePrecision("height").notNull().default(160),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const stickyNotes = pgTable(
+  "sticky_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Anonymous browser/player-level ownership — the same Player identity
+    // used for Reaction Test, not a real authenticated account. Nullable
+    // because rows created before this column existed have no owner and
+    // are deliberately left inaccessible (not deleted, not reassigned) —
+    // see the sticky_notes migration for that backward-compat decision.
+    playerId: uuid("player_id").references(() => players.id),
+    content: text("content").notNull().default(""),
+    color: text("color").notNull().default("yellow"),
+    pinned: boolean("pinned").notNull().default(false),
+    // Position/size lock — when true, dragging and resizing are disabled
+    // client-side; content editing and pin/color/delete stay available.
+    // Distinct from `pinned` (which only affects list ordering).
+    locked: boolean("locked").notNull().default(false),
+    // Freeform canvas position, in canvas/viewport pixels. Defaulted so
+    // existing rows (added before the canvas layout existed) get a safe,
+    // on-screen position via this same column default.
+    x: doublePrecision("x").notNull().default(24),
+    y: doublePrecision("y").notNull().default(24),
+    // Freeform canvas size, in pixels. Defaulted so existing rows (added
+    // before resizing existed) get a sensible on-screen size via this same
+    // column default.
+    width: doublePrecision("width").notNull().default(200),
+    height: doublePrecision("height").notNull().default(160),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("sticky_notes_player_id_idx").on(table.playerId)],
+);
 
 export const gameResults = pgTable(
   "game_results",

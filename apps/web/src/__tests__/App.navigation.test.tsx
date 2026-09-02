@@ -33,7 +33,20 @@ describe("App navigation", () => {
     expect(screen.getByRole("button", { name: "메모" }).getAttribute("aria-current")).toBe("true");
   });
 
-  it("navigates to 스티커 메모", async () => {
+  it("navigates to 스티커 메모 and prompts for a nickname when no player exists yet", async () => {
+    render(<App />);
+    await screen.findByText(/아직 메모가 없습니다/);
+    fireEvent.click(screen.getByRole("button", { name: "스티커 메모" }));
+
+    // Sticky Notes are now scoped to a playerId, so it reuses the same
+    // nickname gate Reaction Test already uses.
+    expect(await screen.findByPlaceholderText("Your nickname")).toBeTruthy();
+  });
+
+  it("navigates to 스티커 메모 and shows the empty state once a player exists", async () => {
+    localStorage.setItem("mini-game-hub:playerId", "p1");
+    localStorage.setItem("mini-game-hub:nickname", "Sanghyun");
+
     render(<App />);
     await screen.findByText(/아직 메모가 없습니다/);
     fireEvent.click(screen.getByRole("button", { name: "스티커 메모" }));
@@ -49,7 +62,7 @@ describe("App navigation", () => {
     expect(await screen.findByText("Reaction Test")).toBeTruthy();
   });
 
-  it("prompts for a nickname only when entering Reaction Test, not for Notes/Sticky Notes", async () => {
+  it("does not prompt for a nickname on the default 메모 view, only once Reaction Test or Sticky Notes is entered", async () => {
     render(<App />);
     await screen.findByText(/아직 메모가 없습니다/);
     expect(screen.queryByPlaceholderText("Your nickname")).toBeNull();
@@ -74,9 +87,12 @@ describe("App navigation", () => {
   });
 
   it("a sticky note survives switching to Notes/Tools and back to Sticky Notes (no reset, no refetch)", async () => {
+    localStorage.setItem("mini-game-hub:playerId", "p1");
+    localStorage.setItem("mini-game-hub:nickname", "Sanghyun");
     vi.mocked(listStickyNotes).mockResolvedValue([
       {
         id: "s1",
+        playerId: "p1",
         content: "keep me",
         color: "yellow",
         pinned: false,

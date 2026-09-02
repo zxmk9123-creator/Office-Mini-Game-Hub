@@ -1,4 +1,6 @@
+import type { PlayerRepository } from "../repositories/playerRepository";
 import type { StickyNoteRecord, StickyNoteRepository } from "../repositories/stickyNoteRepository";
+import { PlayerNotFoundError } from "./playerService";
 
 /** A deliberately restrained palette — not a free-form color picker. */
 export const STICKY_NOTE_COLORS = ["yellow", "pink", "blue", "green", "purple"] as const;
@@ -64,10 +66,22 @@ function normalizeDimension(value: number, axis: "width" | "height", min: number
   return value;
 }
 
+/**
+ * `playerId` here is the same anonymous, browser-local Player identity
+ * used elsewhere (Reaction Test) — not an authenticated account. It gives
+ * browser/player-level separation between Sticky Note collections, not
+ * account-level security: a client that already knows another player's id
+ * could still claim it (see the Route/Service docs on this — there is no
+ * login system in this app to verify identity against).
+ */
 export class StickyNoteService {
-  constructor(private readonly repository: StickyNoteRepository) {}
+  constructor(
+    private readonly repository: StickyNoteRepository,
+    private readonly playerRepository: PlayerRepository,
+  ) {}
 
   async createStickyNote(input: {
+    playerId: string;
     content: string;
     color?: string;
     x?: number;
@@ -75,7 +89,12 @@ export class StickyNoteService {
     width?: number;
     height?: number;
   }): Promise<StickyNoteRecord> {
+    const player = await this.playerRepository.findById(input.playerId);
+    if (!player) {
+      throw new PlayerNotFoundError(input.playerId);
+    }
     return this.repository.create({
+      playerId: input.playerId,
       content: normalizeContent(input.content),
       color: normalizeColor(input.color),
       x: input.x !== undefined ? normalizeCoordinate(input.x, "x") : DEFAULT_STICKY_NOTE_POSITION.x,
@@ -91,12 +110,14 @@ export class StickyNoteService {
     });
   }
 
-  async listStickyNotes(): Promise<StickyNoteRecord[]> {
-    return this.repository.findAll();
+  /** Only this player's own notes — the DB query itself is scoped, not filtered after the fact. */
+  async listStickyNotes(playerId: string): Promise<StickyNoteRecord[]> {
+    return this.repository.findAllForPlayer(playerId);
   }
 
   async updateStickyNote(
     id: string,
+    playerId: string,
     input: {
       content?: string;
       color?: string;
@@ -142,15 +163,18 @@ export class StickyNoteService {
     if (input.height !== undefined) {
       patch.height = normalizeDimension(input.height, "height", MIN_STICKY_NOTE_HEIGHT);
     }
-    const stickyNote = await this.repository.update(id, patch);
+    // A mismatched playerId returns null exactly like a missing id — the
+    // caller can't tell "not yours" from "doesn't exist", which is the
+    // best this anonymous-id scheme can offer without real auth.
+    const stickyNote = await this.repository.update(id, playerId, patch);
     if (!stickyNote) {
       throw new StickyNoteNotFoundError(id);
     }
     return stickyNote;
   }
 
-  async deleteStickyNote(id: string): Promise<void> {
-    const deleted = await this.repository.delete(id);
+  async deleteStickyNote(id: string, playerId: string): Promise<void> {
+    const deleted = await this.repository.delete(id, playerId);
     if (!deleted) {
       throw new StickyNoteNotFoundError(id);
     }

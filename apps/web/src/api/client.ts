@@ -134,6 +134,7 @@ export type StickyNoteColor = "yellow" | "pink" | "blue" | "green" | "purple";
 
 export interface StickyNoteDto {
   id: string;
+  playerId: string | null;
   content: string;
   color: StickyNoteColor;
   pinned: boolean;
@@ -146,11 +147,20 @@ export interface StickyNoteDto {
   updatedAt: string;
 }
 
-export function listStickyNotes(): Promise<StickyNoteDto[]> {
-  return request<StickyNoteDto[]>("/sticky-notes");
+/**
+ * `playerId` is the same anonymous, browser-local Player identity used
+ * elsewhere (Reaction Test) — every Sticky Note call is scoped to it.
+ * This gives each browser/player its own private notes, not
+ * authenticated-account security: there is no login in this app, so this
+ * id is trusted as-sent, exactly like the existing GameSession endpoints.
+ */
+export function listStickyNotes(playerId: string): Promise<StickyNoteDto[]> {
+  const params = new URLSearchParams({ playerId });
+  return request<StickyNoteDto[]>(`/sticky-notes?${params.toString()}`);
 }
 
 export function createStickyNote(input: {
+  playerId: string;
   content?: string;
   color?: StickyNoteColor;
   x?: number;
@@ -163,6 +173,7 @@ export function createStickyNote(input: {
 
 export function updateStickyNote(
   id: string,
+  playerId: string,
   input: {
     content?: string;
     color?: StickyNoteColor;
@@ -174,11 +185,15 @@ export function updateStickyNote(
     height?: number;
   },
 ): Promise<StickyNoteDto> {
-  return request<StickyNoteDto>(`/sticky-notes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  return request<StickyNoteDto>(`/sticky-notes/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ playerId, ...input }),
+  });
 }
 
-export function deleteStickyNote(id: string): Promise<void> {
-  return request<void>(`/sticky-notes/${id}`, { method: "DELETE" });
+export function deleteStickyNote(id: string, playerId: string): Promise<void> {
+  const params = new URLSearchParams({ playerId });
+  return request<void>(`/sticky-notes/${id}?${params.toString()}`, { method: "DELETE" });
 }
 
 export function getRanking(

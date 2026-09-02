@@ -91,7 +91,7 @@ export default function App() {
         </nav>
         <main className="min-h-0 flex-1 overflow-y-auto">
           {body}
-          <StickyNotesView active={section === "sticky-notes"} boardRef={boardRef} />
+          <StickyNotesView active={section === "sticky-notes"} boardRef={boardRef} session={session} />
         </main>
       </div>
     </div>
