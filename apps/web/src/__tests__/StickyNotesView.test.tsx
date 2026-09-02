@@ -1224,5 +1224,25 @@ describe("StickyNotesView", () => {
       const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
       expect(textarea.value).toBe("buy milk");
     });
+
+    it("becomes typeable after clicking the read-only preview (regression: preview overlay must not leave the textarea unfocusable)", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, content: "buy milk and eggs" });
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+
+      const preview = await screen.findByTestId("sticky-note-preview-s1");
+      fireEvent.click(preview);
+
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+      expect(document.activeElement).toBe(textarea);
+
+      fireEvent.change(textarea, { target: { value: "buy milk and eggs" } });
+      expect(textarea.value).toBe("buy milk and eggs");
+
+      fireEvent.blur(textarea);
+      await waitFor(() =>
+        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { content: "buy milk and eggs" }),
+      );
+    });
   });
 });
