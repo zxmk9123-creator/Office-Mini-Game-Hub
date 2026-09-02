@@ -208,9 +208,8 @@ export function SwipeBrickBreakerView({
       <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
         <p className="text-xs text-neutral-400">{nickname}</p>
         <p className="text-sm font-semibold text-neutral-800">GAME OVER</p>
-        <p className="text-xs uppercase tracking-wide text-neutral-400">Score</p>
-        <p className="text-2xl font-semibold text-neutral-900">{result.score}</p>
-        <p className="text-xs text-neutral-500">Round {result.metadata.level}</p>
+        <p className="text-xs uppercase tracking-wide text-neutral-400">Round</p>
+        <p className="text-2xl font-semibold text-neutral-900">{result.metadata.level}</p>
         <SubmissionStatusLine status={submissionStatus} />
         <div className="mt-2 flex gap-2">
           <button
@@ -231,7 +230,7 @@ export function SwipeBrickBreakerView({
         </div>
         {submissionStatus === "saved" && persistedResult && (
           <div className="mt-3 w-full border-t border-neutral-100 pt-3">
-            <p className="mb-1 text-xs text-neutral-400">Best Score</p>
+            <p className="mb-1 text-xs text-neutral-400">Best Round</p>
             <Leaderboard gameId={GAME_ID} playerId={playerId} refreshKey={persistedResult.id} limit={1} />
           </div>
         )}
@@ -245,9 +244,6 @@ export function SwipeBrickBreakerView({
       <div className="flex items-center justify-between px-1">
         <HomeLink onHome={onHome} />
         <div className="flex gap-3 text-xs text-neutral-600">
-          <span>
-            Score <span className="font-semibold text-neutral-900">{gameState?.score ?? 0}</span>
-          </span>
           <span>
             Round <span className="font-semibold text-neutral-900">{gameState?.level ?? 1}</span>
           </span>

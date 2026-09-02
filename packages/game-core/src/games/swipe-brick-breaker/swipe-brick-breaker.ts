@@ -99,7 +99,6 @@ export class SwipeBrickBreakerGame
       phase: "ready",
       level: 0,
       ballCount: 0,
-      score: 0,
       bricks: [],
       redBonusBalls: [],
       balls: [],
@@ -118,7 +117,6 @@ export class SwipeBrickBreakerGame
       phase: "ready",
       level: 1,
       ballCount: 1,
-      score: 0,
       bricks: formation.bricks,
       redBonusBalls: formation.redBonusBalls,
       balls: [],
@@ -204,17 +202,16 @@ export class SwipeBrickBreakerGame
     });
     const { bricks, redBonusBalls, hits, collected } = stepResult;
 
-    let scoreDelta = 0;
+    // No score accumulation from block hits — the HUD/result no longer
+    // display or track a block-hit score at all. Bricks-destroyed is still
+    // tracked (for result metadata only), it just no longer feeds a score.
     for (const hit of hits) {
-      scoreDelta += 10 + state.level;
       if (hit.destroyed) {
-        scoreDelta += 20 + hit.brick.maxHp * 10;
         this.bricksDestroyed += 1;
       }
     }
     let ballGainDelta = 0;
     for (const _collectedBall of collected) {
-      scoreDelta += 30 + state.level * 2;
       this.redBonusBallsCollected += 1;
       ballGainDelta += 1;
     }
@@ -222,7 +219,7 @@ export class SwipeBrickBreakerGame
     const pendingBallGain = state.pendingBallGain + ballGainDelta;
     const volleyOver = balls.every((b) => !b.active);
     if (!volleyOver) {
-      return { ...state, balls, bricks, redBonusBalls, score: state.score + scoreDelta, pendingBallGain };
+      return { ...state, balls, bricks, redBonusBalls, pendingBallGain };
     }
 
     return this.resolveTurn({
@@ -230,7 +227,6 @@ export class SwipeBrickBreakerGame
       balls: [],
       bricks,
       redBonusBalls,
-      score: state.score + scoreDelta,
       pendingBallGain,
     });
   }
@@ -289,7 +285,10 @@ export class SwipeBrickBreakerGame
     return {
       gameId: this.metadata.id,
       scoreType: this.metadata.scoreType,
-      score: state.score,
+      // Round replaces block-hit score as this game's ranked metric — the
+      // ranking infrastructure still needs a plain number, and Round is
+      // now that number (the round reached is exactly `level`).
+      score: state.level,
       completion: {
         reason: "completed",
         completedAt: this.clock.now(),

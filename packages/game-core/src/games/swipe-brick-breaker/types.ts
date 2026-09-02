@@ -106,9 +106,9 @@ export type SwipeBrickBreakerPhase = "ready" | "aiming" | "volley" | "gameOver";
 
 export interface SwipeBrickBreakerState {
   phase: SwipeBrickBreakerPhase;
+  /** The current round. Starts at 1, increases by exactly 1 per completed volley — independent of block hits, brick HP, or ball count. */
   level: number;
   ballCount: number;
-  score: number;
   bricks: Brick[];
   redBonusBalls: RedBonusBall[];
   balls: Ball[];

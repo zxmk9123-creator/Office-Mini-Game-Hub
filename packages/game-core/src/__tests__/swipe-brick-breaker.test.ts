@@ -882,10 +882,9 @@ describe("SwipeBrickBreakerGame — game over", () => {
     expect(result.completion.reason).toBe("completed");
     expect(result.score).toBeGreaterThanOrEqual(0);
 
-    // Restart: a fresh start() must reset score/level/ballCount/bricks/balls/phase.
+    // Restart: a fresh start() must reset level/ballCount/bricks/balls/phase.
     const restarted = game.start(game.createInitialState());
     expect(restarted.phase).toBe("ready");
-    expect(restarted.score).toBe(0);
     expect(restarted.level).toBe(1);
     expect(restarted.ballCount).toBe(1);
     expect(restarted.balls).toHaveLength(0);
@@ -972,23 +971,40 @@ describe("SwipeBrickBreakerGame — formation movement (final one-row-descent ru
   });
 });
 
-describe("SwipeBrickBreakerGame — scoring", () => {
-  it("score increases after a valid brick hit and has no clamp/maximum", () => {
-    const game = new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.99]));
+describe("SwipeBrickBreakerGame — Round replaces block-hit score", () => {
+  function newGame() {
+    return new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.99]));
+  }
+
+  it("SwipeBrickBreakerState has no score field at all — block hits accumulate nothing", () => {
+    const game = newGame();
     let state = game.start(game.createInitialState());
+    expect("score" in state).toBe(false);
     state = { ...state, bricks: [{ row: 3, col: 3, hp: 1, maxHp: 1 }] };
     state = game.handleInput(state, { type: "aim", angleRad: 0 });
     state = game.handleInput(state, { type: "fire" });
-    const scoreBefore = state.score;
     for (let i = 0; i < 3000 && state.phase === "volley"; i++) {
       state = game.handleInput(state, { type: "tick", dtMs: 16 });
+      expect("score" in state).toBe(false);
     }
-    expect(state.score).toBeGreaterThan(scoreBefore);
+  });
 
-    // No fixed maximum: directly construct an enormous score and confirm
-    // the engine never clamps it back down on the next tick.
-    const hugeScoreState = { ...state, score: Number.MAX_SAFE_INTEGER - 1000, phase: "ready" as const };
-    const afterAim = game.handleInput(hugeScoreState, { type: "aim", angleRad: 0 });
-    expect(afterAim.score).toBe(Number.MAX_SAFE_INTEGER - 1000);
+  it("computeResult's score is exactly the round reached (state.level), not derived from hits/HP/ball count", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    expect(game.computeResult(state).score).toBe(state.level);
+
+    // Advance a few rounds (clearing bricks each time so hit count/brick
+    // HP/ball count vary independently of round) and confirm the result
+    // score always tracks the round alone.
+    for (let turn = 0; turn < 4; turn++) {
+      state = { ...state, bricks: [], redBonusBalls: [] };
+      state = game.handleInput(state, { type: "aim", angleRad: 0.1 });
+      state = game.handleInput(state, { type: "fire" });
+      for (let i = 0; i < 3000 && state.phase === "volley"; i++) {
+        state = game.handleInput(state, { type: "tick", dtMs: 16 });
+      }
+      expect(game.computeResult(state).score).toBe(state.level);
+    }
   });
 });
