@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { NotesView } from "./notebook/NotesView";
+import { MemoGate } from "./notebook/MemoGate";
 import { StickyNotesView } from "./notebook/StickyNotesView";
 import { ToolsList } from "./tools/ToolsList";
 import { NicknameEntry } from "./player/NicknameEntry";
@@ -19,6 +20,13 @@ export default function App() {
   const session = usePlayerSession();
   const [section, setSection] = useState<Section>("notes");
   const [toolScreen, setToolScreen] = useState<ToolScreen>("list");
+  // A lightweight access gate in front of Memo only — independent of
+  // Player identity (never reset by switching players) and independent
+  // of which other tab is visited (App itself never unmounts, so this
+  // survives Memo <-> Sticky Notes <-> Tools navigation); it resets only
+  // on an actual page reload/new session, since it's plain component
+  // state with no storage backing it.
+  const [memoUnlocked, setMemoUnlocked] = useState(false);
   // The Main Board panel's real DOM node — measured live via
   // getBoundingClientRect() wherever a Sticky Note needs to avoid it,
   // never hardcoded, so it stays correct if the panel ever moves/resizes.
@@ -38,7 +46,7 @@ export default function App() {
   // when leaving and returning to the 스티커 메모 tab.
   let body: React.ReactNode = null;
   if (section === "notes") {
-    body = <NotesView />;
+    body = memoUnlocked ? <NotesView /> : <MemoGate onUnlock={() => setMemoUnlocked(true)} />;
   } else if (section === "tools") {
     if (toolScreen === "reaction-test") {
       if (!session.playerId || !session.nickname) {

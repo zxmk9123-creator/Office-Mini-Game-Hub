@@ -134,3 +134,26 @@ describe("player switching keeps Sticky Notes correctly isolated per returning p
     expect(mockedCreatePlayer).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("Memo access gate is independent of Player identity (Test 6)", () => {
+  it("stays unlocked after switching from Alice to Bob", async () => {
+    render(<App />);
+
+    // Alice unlocks Memo.
+    fireEvent.click(screen.getByRole("button", { name: "메모" }));
+    fireEvent.change(screen.getByLabelText("사명을 입력하시오."), { target: { value: "강박여" } });
+    fireEvent.click(screen.getByRole("button", { name: "확인" }));
+    expect(await screen.findByText(/아직 메모가 없습니다/)).toBeTruthy();
+
+    // Alice then also sets up her Player identity via Sticky Notes, and switches to Bob.
+    fireEvent.click(screen.getByRole("button", { name: "스티커 메모" }));
+    await loginAs("Alice");
+    switchPlayer();
+    await loginAs("Bob");
+
+    // Entering Memo as Bob must not show the gate again.
+    fireEvent.click(screen.getByRole("button", { name: "메모" }));
+    expect(await screen.findByText(/아직 메모가 없습니다/)).toBeTruthy();
+    expect(screen.queryByText("사명을 입력하시오.")).toBeNull();
+  });
+});
