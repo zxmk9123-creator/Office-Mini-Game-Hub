@@ -40,15 +40,27 @@ export function MemoGate({ onUnlock }: { onUnlock: () => void }) {
       <div>
         <p className="text-sm font-medium text-neutral-800">사명을 입력하시오.</p>
       </div>
-      <form onSubmit={handleSubmit} className="flex w-full max-w-[220px] flex-col gap-2">
-        <label htmlFor="memo-gate-answer" className="sr-only">
+      <form onSubmit={handleSubmit} autoComplete="off" className="flex w-full max-w-[220px] flex-col gap-2">
+        <label htmlFor="memo-gate-phrase" className="sr-only">
           사명을 입력하시오.
         </label>
         <input
           ref={inputRef}
-          id="memo-gate-answer"
-          name="memo-gate-answer"
+          id="memo-gate-phrase"
+          // Deliberately not `name="memo-gate-answer"` (the name used
+          // before this fix): Chrome's plain-text-field autofill history
+          // is keyed by name, so keeping the old name could still surface
+          // previously-typed answers from before autoComplete="off" was
+          // added, even though it's on the field now. A fresh name has no
+          // history to draw from.
+          name="memo-gate-phrase"
           type="text"
+          // Prevents Chrome (and other browsers) from offering previously
+          // typed values for this field via its autofill-suggestions
+          // dropdown. Not a semantic autocomplete token (e.g. "username")
+          // since this is an access phrase, not a profile field — "off"
+          // is the correct, least-surprising value here.
+          autoComplete="off"
           autoFocus
           value={value}
           onChange={(event) => {

@@ -13,6 +13,20 @@ describe("MemoGate", () => {
     expect(screen.getByRole("button", { name: "확인" })).toBeTruthy();
   });
 
+  it("starts empty and disables browser autofill suggestions, without using a semantic profile-field token", () => {
+    render(<MemoGate onUnlock={vi.fn()} />);
+    const input = screen.getByLabelText("사명을 입력하시오.") as HTMLInputElement;
+
+    expect(input.value).toBe("");
+    expect(input.getAttribute("autocomplete")).toBe("off");
+    expect(input.closest("form")?.getAttribute("autocomplete")).toBe("off");
+    // Not a semantic autofill token like "username"/"name"/"email" — this
+    // is an access phrase, not a profile field.
+    expect(["username", "name", "email", "current-password", "new-password"]).not.toContain(
+      input.getAttribute("autocomplete"),
+    );
+  });
+
   it("rejects an incorrect answer, keeps the gate closed, and shows a clear error without revealing the answer", () => {
     const onUnlock = vi.fn();
     render(<MemoGate onUnlock={onUnlock} />);
