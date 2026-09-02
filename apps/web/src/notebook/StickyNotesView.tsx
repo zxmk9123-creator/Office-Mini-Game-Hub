@@ -424,7 +424,7 @@ function StickyNoteCard({
           placeholder="내용을 입력하세요… (**굵게**, _기울임_, ~~취소선~~)"
           aria-label="스티커 메모 내용"
           className={`h-full min-h-0 w-full cursor-text resize-none bg-transparent text-sm text-neutral-800 outline-none ${
-            isEditingContent ? "" : "invisible"
+            isEditingContent ? "" : "opacity-0"
           }`}
         />
         {!isEditingContent && (
