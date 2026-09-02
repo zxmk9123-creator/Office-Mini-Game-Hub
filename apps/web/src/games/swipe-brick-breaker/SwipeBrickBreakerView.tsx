@@ -210,7 +210,7 @@ export function SwipeBrickBreakerView({
         <p className="text-sm font-semibold text-neutral-800">GAME OVER</p>
         <p className="text-xs uppercase tracking-wide text-neutral-400">Score</p>
         <p className="text-2xl font-semibold text-neutral-900">{result.score}</p>
-        <p className="text-xs text-neutral-500">Level {result.metadata.level}</p>
+        <p className="text-xs text-neutral-500">Round {result.metadata.level}</p>
         <SubmissionStatusLine status={submissionStatus} />
         <div className="mt-2 flex gap-2">
           <button
@@ -249,7 +249,7 @@ export function SwipeBrickBreakerView({
             Score <span className="font-semibold text-neutral-900">{gameState?.score ?? 0}</span>
           </span>
           <span>
-            Level <span className="font-semibold text-neutral-900">{gameState?.level ?? 1}</span>
+            Round <span className="font-semibold text-neutral-900">{gameState?.level ?? 1}</span>
           </span>
           <span>
             Balls <span className="font-semibold text-neutral-900">{gameState?.ballCount ?? 1}</span>

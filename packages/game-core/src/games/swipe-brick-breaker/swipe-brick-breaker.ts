@@ -51,13 +51,15 @@ function launchBalls(ballCount: number, aimAngleRad: number, level: number): Bal
   const speed = speedForLevel(level);
   const balls: Ball[] = [];
   for (let i = 0; i < ballCount; i++) {
-    // Ball 0 fires exactly on the aimed line; every subsequent ball gets a
-    // small, deterministic, alternating offset around it so a multi-ball
-    // volley fans out slightly instead of every ball perfectly overlapping
-    // forever — without being wide enough to defeat deliberate aiming.
-    const step = Math.ceil(i / 2);
+    // Ball 0 fires exactly on the aimed line — the same direction the aim
+    // guide showed. Every subsequent ball gets a tiny fixed, deterministic
+    // offset (alternating -/+ BALL_SPREAD_RADIANS) purely so multiple
+    // balls don't perfectly overlap forever; it is NEVER scaled by ball
+    // index/count, so the whole volley — 2 balls or 50 — stays a tight,
+    // essentially parallel group rather than fanning out wider as more
+    // balls join. This is deliberately not a shotgun-spread mechanic.
     const sign = i % 2 === 0 ? -1 : 1;
-    const angle = clampAim(aimAngleRad + (i === 0 ? 0 : sign * step * BALL_SPREAD_RADIANS));
+    const angle = clampAim(aimAngleRad + (i === 0 ? 0 : sign * BALL_SPREAD_RADIANS));
     balls.push({
       x: LAUNCH_X,
       y: LAUNCH_Y,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BALL_SPREAD_RADIANS,
   BOARD_COLS,
   BOARD_ROWS,
   FORMATION_TOP_ROW,
@@ -344,6 +345,142 @@ describe("SwipeBrickBreakerGame — level/ball progression", () => {
   });
 });
 
+// "Round" is displayed in the UI (SwipeBrickBreakerView) and IS the
+// `level` field underneath — round = number of completed volleys + 1.
+// These tests pin down that exact semantics: it is a pure turn counter,
+// never derived from brick count, brick HP, ball count, or score (even
+// though ballCount happens to equal it by the separate, explicit
+// "+1 ball per level" rule — that's a coincidence of two independent
+// rules sharing a value, not round being *defined* as ball count).
+describe("SwipeBrickBreakerGame — round progression (round = completedVolleys + 1)", () => {
+  function newGame() {
+    return new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.5, 0.1, 0.9, 0.3, 0.6, 0.2]));
+  }
+
+  function completeOneVolley(game: SwipeBrickBreakerGame, state: ReturnType<SwipeBrickBreakerGame["start"]>) {
+    state = game.handleInput(state, { type: "aim", angleRad: 0.15 });
+    state = game.handleInput(state, { type: "fire" });
+    for (let i = 0; i < 20000 && state.phase === "volley"; i++) {
+      state = game.handleInput(state, { type: "tick", dtMs: 16 });
+    }
+    return state;
+  }
+
+  it("the initial round, before any shot, is 1", () => {
+    const game = newGame();
+    const state = game.start(game.createInitialState());
+    expect(state.level).toBe(1);
+  });
+
+  it("completing the first volley changes round 1 -> 2", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    expect(state.level).toBe(1);
+    state = completeOneVolley(game, state);
+    expect(state.phase).not.toBe("volley");
+    if (state.phase !== "gameOver") {
+      expect(state.level).toBe(2);
+    }
+  });
+
+  it("completing two volleys changes round 1 -> 2 -> 3, each volley incrementing exactly once", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    const rounds = [state.level];
+
+    state = completeOneVolley(game, state);
+    rounds.push(state.level);
+    if (state.phase === "gameOver") return; // rare with this seed; the single-volley test above covers this case directly
+
+    state = completeOneVolley(game, state);
+    rounds.push(state.level);
+
+    expect(rounds[0]).toBe(1);
+    expect(rounds[1]).toBe(2);
+    if (state.phase !== "gameOver") {
+      expect(rounds[2]).toBe(3);
+    }
+    // Exactly +1 per completed volley, never more.
+    for (let i = 1; i < rounds.length; i++) {
+      expect(rounds[i] - rounds[i - 1]).toBe(1);
+    }
+  });
+
+  it("a volley with multiple balls and multiple collisions still increments the round exactly once", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    // Force a busy volley: several bricks in the ball's path, several balls.
+    state = {
+      ...state,
+      ballCount: 4,
+      level: 4,
+      bricks: [
+        { row: 2, col: 3, hp: 1, maxHp: 1 },
+        { row: 3, col: 3, hp: 1, maxHp: 1 },
+        { row: 4, col: 3, hp: 1, maxHp: 1 },
+      ],
+    };
+    const roundBefore = state.level;
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+    for (let i = 0; i < 20000 && state.phase === "volley"; i++) {
+      state = game.handleInput(state, { type: "tick", dtMs: 16 });
+    }
+    expect(state.phase).not.toBe("volley");
+    if (state.phase !== "gameOver") {
+      expect(state.level).toBe(roundBefore + 1); // exactly +1, regardless of how many balls/hits occurred
+    }
+  });
+
+  it("round continues increasing well beyond 9/10 without wrapping or resetting", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    expect(state.level).toBe(1);
+    // Clear bricks before every volley so this specifically isolates
+    // round-counter behavior from the unrelated question of whether a
+    // given run happens to survive that long — there is nothing here
+    // that could ever cross the Game Over boundary, so any failure to
+    // keep incrementing would be the round counter itself, not bad luck.
+    for (let turn = 0; turn < 15; turn++) {
+      state = { ...state, bricks: [], redBonusBalls: [] };
+      state = completeOneVolley(game, state);
+      expect(state.phase).toBe("ready");
+    }
+    expect(state.level).toBeGreaterThan(9);
+    expect(state.level).toBe(16); // 1 + 15 completed volleys, exactly — no skips, no wrap
+  });
+
+  it("the new brick formation spawned after a volley corresponds to the NEXT round, not the round just completed", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, bricks: [], redBonusBalls: [] }; // nothing pre-existing to shift down
+    const roundBefore = state.level;
+    state = completeOneVolley(game, state);
+    if (state.phase === "ready") {
+      // Every brick present now is newly spawned this turn — for the round AFTER roundBefore.
+      expect(state.level).toBe(roundBefore + 1);
+      expect(state.bricks.length).toBeGreaterThan(0);
+      expect(state.bricks.every((b) => b.row === FORMATION_TOP_ROW)).toBe(true);
+    }
+  });
+
+  it("one-row descent and the permanent empty Row 0 buffer are unchanged by round progression", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    // High HP so it survives being hit (the ball's aim doesn't even cross
+    // its column, but this keeps the test robust either way) — identified
+    // by column alone below, since a hit could otherwise change its hp.
+    state = { ...state, bricks: [{ row: 2, col: 4, hp: 99, maxHp: 99 }], redBonusBalls: [] };
+    state = completeOneVolley(game, state);
+    if (state.phase !== "gameOver") {
+      const moved = state.bricks.find((b) => b.col === 4);
+      expect(moved).toBeTruthy();
+      expect(moved?.row).toBe(3); // exactly +1
+      expect(state.bricks.every((b) => b.row !== 0)).toBe(true);
+    }
+  });
+});
+
 describe("SwipeBrickBreakerGame — volley/fire", () => {
   function newGame() {
     return new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.1, 0.9, 0.5]));
@@ -428,6 +565,60 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
           expect(b.vy).toBe(launchDirections[i].vy);
         }
       });
+    }
+  });
+
+  it("the first/current ball always fires exactly along the drag-derived aim direction, regardless of ball count", () => {
+    for (const ballCount of [1, 2, 5, 10, 30]) {
+      const game = newGame();
+      let state = game.start(game.createInitialState());
+      state = { ...state, ballCount, level: ballCount };
+      state = game.handleInput(state, { type: "aim", angleRad: -0.25 });
+      state = game.handleInput(state, { type: "fire" });
+
+      const speed = Math.hypot(state.balls[0].vx, state.balls[0].vy);
+      const angle = Math.atan2(state.balls[0].vx / speed, -state.balls[0].vy / speed);
+      expect(angle).toBeCloseTo(-0.25, 10);
+    }
+  });
+
+  it("no wide angular fan: every ball's direction stays within BALL_SPREAD_RADIANS of the aim, no matter how many balls fire", () => {
+    for (const ballCount of [2, 5, 10, 20, 50]) {
+      const game = newGame();
+      let state = game.start(game.createInitialState());
+      state = { ...state, ballCount, level: ballCount };
+      const aimAngle = 0.1;
+      state = game.handleInput(state, { type: "aim", angleRad: aimAngle });
+      state = game.handleInput(state, { type: "fire" });
+
+      for (const b of state.balls) {
+        const speed = Math.hypot(b.vx, b.vy);
+        const ballAngle = Math.atan2(b.vx / speed, -b.vy / speed);
+        // The whole group stays within a fixed, tiny band around the aim
+        // — not a fan that widens as more balls join the volley.
+        expect(Math.abs(ballAngle - aimAngle)).toBeLessThanOrEqual(BALL_SPREAD_RADIANS + 1e-9);
+      }
+    }
+  });
+
+  it("multi-ball offsets are a fixed +/-BALL_SPREAD_RADIANS, never scaled by ball index (the previous shotgun-fan bug)", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, ballCount: 12, level: 12 };
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+
+    const angles = state.balls.map((b) => {
+      const speed = Math.hypot(b.vx, b.vy);
+      return Math.atan2(b.vx / speed, -b.vy / speed);
+    });
+    const distinctOffsets = new Set(angles.map((a) => Math.round((a - 0) * 1e6) / 1e6));
+    // Only ever 3 distinct headings across the whole volley: the exact
+    // aim, aim - spread, and aim + spread — never a growing ladder of
+    // increasingly wide offsets per ball.
+    expect(distinctOffsets.size).toBeLessThanOrEqual(3);
+    for (const a of angles) {
+      expect(Math.abs(a)).toBeLessThanOrEqual(BALL_SPREAD_RADIANS + 1e-9);
     }
   });
 });

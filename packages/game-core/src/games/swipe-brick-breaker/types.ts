@@ -61,8 +61,16 @@ export const FORMATION_TOP_ROW = 1;
 /** Aim is clamped to this many radians either side of straight up — never horizontal or downward. */
 export const MAX_AIM_RADIANS = (70 * Math.PI) / 180;
 
-/** Angular spread applied to balls after the first in a multi-ball volley. */
-export const BALL_SPREAD_RADIANS = (4 * Math.PI) / 180;
+/**
+ * Fixed angular offset applied to balls after the first in a multi-ball
+ * volley — purely for visual separation, not a spread mechanic. Every
+ * ball after the first alternates between -BALL_SPREAD_RADIANS and
+ * +BALL_SPREAD_RADIANS around the aimed direction; this value is never
+ * multiplied by ball index/count, so the total fan width stays exactly
+ * this tiny either way no matter how many balls are in the volley (level
+ * 2 or level 50) — the whole group travels essentially straight together.
+ */
+export const BALL_SPREAD_RADIANS = (1.5 * Math.PI) / 180;
 
 export interface Brick {
   row: number;
