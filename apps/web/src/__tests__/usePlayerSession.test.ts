@@ -102,4 +102,128 @@ describe("usePlayerSession", () => {
     });
     await waitFor(() => expect(result.current.playerId).toBe("player-1"));
   });
+
+  describe("returning-player identity (local registry)", () => {
+    it("Test 1 — restores the same playerId for a returning player without creating a second one", async () => {
+      mockedCreatePlayer.mockResolvedValue({
+        id: "player-A",
+        nickname: "Alice",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      const { result, unmount } = renderHook(() => usePlayerSession());
+
+      await act(async () => {
+        await result.current.setNickname("Alice");
+      });
+      expect(result.current.playerId).toBe("player-A");
+
+      // Switch away, as the "플레이어 전환" control does.
+      act(() => result.current.clearPlayer());
+      expect(result.current.playerId).toBeNull();
+      unmount();
+
+      // Return, in a brand-new hook instance (e.g. after a reload).
+      const { result: second } = renderHook(() => usePlayerSession());
+      await act(async () => {
+        await second.current.setNickname("Alice");
+      });
+
+      expect(second.current.playerId).toBe("player-A");
+      expect(mockedCreatePlayer).toHaveBeenCalledTimes(1); // never called a second time
+    });
+
+    it("Test 2 — multiple players keep stable, independent identities across repeated switches", async () => {
+      mockedCreatePlayer.mockImplementation(async (nickname: string) => ({
+        id: nickname === "Alice" ? "player-A" : "player-B",
+        nickname,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }));
+      const { result } = renderHook(() => usePlayerSession());
+
+      await act(async () => {
+        await result.current.setNickname("Alice");
+      });
+      expect(result.current.playerId).toBe("player-A");
+
+      act(() => result.current.clearPlayer());
+      await act(async () => {
+        await result.current.setNickname("Bob");
+      });
+      expect(result.current.playerId).toBe("player-B");
+
+      act(() => result.current.clearPlayer());
+      await act(async () => {
+        await result.current.setNickname("Alice");
+      });
+      expect(result.current.playerId).toBe("player-A");
+
+      act(() => result.current.clearPlayer());
+      await act(async () => {
+        await result.current.setNickname("Bob");
+      });
+      expect(result.current.playerId).toBe("player-B");
+
+      expect(mockedCreatePlayer).toHaveBeenCalledTimes(2); // one Player row each, ever
+    });
+
+    it("Test 4 — migrates a pre-registry browser's single legacy identity instead of losing it", async () => {
+      localStorage.setItem("mini-game-hub:playerId", "legacy-player");
+      localStorage.setItem("mini-game-hub:nickname", "Legacy");
+
+      const { result } = renderHook(() => usePlayerSession());
+      // The legacy identity is still the active one on mount, unchanged.
+      expect(result.current.playerId).toBe("legacy-player");
+
+      // Switch away and back — this only works if migration actually
+      // registered the legacy identity, since a fresh registry lookup is
+      // the only thing that can restore it now.
+      act(() => result.current.clearPlayer());
+      await act(async () => {
+        await result.current.setNickname("Legacy");
+      });
+
+      expect(result.current.playerId).toBe("legacy-player");
+      expect(mockedCreatePlayer).not.toHaveBeenCalled();
+    });
+
+    it("Test 5 — an unknown nickname still creates exactly one new player", async () => {
+      mockedCreatePlayer.mockResolvedValue({
+        id: "player-new",
+        nickname: "Newcomer",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      const { result } = renderHook(() => usePlayerSession());
+
+      await act(async () => {
+        await result.current.setNickname("Newcomer");
+      });
+
+      expect(mockedCreatePlayer).toHaveBeenCalledTimes(1);
+      expect(mockedCreatePlayer).toHaveBeenCalledWith("Newcomer");
+      expect(result.current.playerId).toBe("player-new");
+    });
+
+    it("Test 6 — the current player identity survives a reload (a fresh hook instance)", async () => {
+      mockedCreatePlayer.mockResolvedValue({
+        id: "player-A",
+        nickname: "Alice",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      const { result, unmount } = renderHook(() => usePlayerSession());
+      await act(async () => {
+        await result.current.setNickname("Alice");
+      });
+      unmount();
+
+      // A reload re-mounts the hook from scratch — without switching
+      // away first, the active single-player keys alone must restore it.
+      const { result: reloaded } = renderHook(() => usePlayerSession());
+      expect(reloaded.current.playerId).toBe("player-A");
+      expect(reloaded.current.nickname).toBe("Alice");
+    });
+  });
 });
