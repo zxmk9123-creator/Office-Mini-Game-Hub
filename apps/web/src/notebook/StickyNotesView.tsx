@@ -67,7 +67,6 @@ function StickyNoteCard({
   viewportHeight,
   onFocus,
   onSaveContent,
-  onTogglePinned,
   onToggleLocked,
   onSetColor,
   onDelete,
@@ -80,7 +79,6 @@ function StickyNoteCard({
   viewportHeight: number;
   onFocus: () => void;
   onSaveContent: (content: string) => void;
-  onTogglePinned: () => void;
   onToggleLocked: () => void;
   onSetColor: (color: StickyNoteColor) => void;
   onDelete: () => void;
@@ -249,27 +247,25 @@ function StickyNoteCard({
       } ${COLOR_CLASSES[note.color]}`}
     >
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onToggleLocked}
-            aria-pressed={note.locked}
-            aria-label={note.locked ? "잠금 해제" : "잠금"}
-            title={note.locked ? "잠금 해제 (이동/크기 조절 가능)" : "잠금 (이동/크기 조절 방지)"}
-            className={`text-xs ${note.locked ? "text-neutral-800" : "text-neutral-400"} hover:text-neutral-700`}
-          >
-            {note.locked ? "🔒" : "🔓"}
-          </button>
-          <button
-            type="button"
-            onClick={onTogglePinned}
-            aria-pressed={note.pinned}
-            title={note.pinned ? "고정 해제" : "고정"}
-            className={`text-xs ${note.pinned ? "text-neutral-800" : "text-neutral-400"} hover:text-neutral-700`}
-          >
-            {note.pinned ? "📌 고정됨" : "📌 고정"}
-          </button>
-        </div>
+        {/*
+          The single position/size lock control. Backed by the `locked`
+          field (drag/resize on/off) — deliberately not the separate,
+          pre-existing `pinned` field (which only ever affected list
+          ordering and has no dedicated control anymore).
+        */}
+        <button
+          type="button"
+          onClick={onToggleLocked}
+          aria-pressed={note.locked}
+          title={note.locked ? "고정 해제 (이동/크기 조절 가능)" : "고정 (이동/크기 조절 방지)"}
+          className={`rounded px-1 py-0.5 text-xs ${
+            note.locked
+              ? "bg-neutral-800 text-white"
+              : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+          }`}
+        >
+          📌 고정
+        </button>
         <button
           type="button"
           onClick={onDelete}
@@ -328,7 +324,6 @@ export function StickyNotesView() {
     error,
     create,
     saveContent,
-    togglePinned,
     toggleLocked,
     setColor,
     updatePosition,
@@ -362,7 +357,6 @@ export function StickyNotesView() {
                 viewportHeight={viewportHeight}
                 onFocus={() => bringToFront(note.id)}
                 onSaveContent={(content) => saveContent(note.id, content)}
-                onTogglePinned={() => togglePinned(note.id, !note.pinned)}
                 onToggleLocked={() => toggleLocked(note.id, !note.locked)}
                 onSetColor={(color) => setColor(note.id, color)}
                 onDelete={() => remove(note.id)}
