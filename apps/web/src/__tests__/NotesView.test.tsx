@@ -82,4 +82,14 @@ describe("NotesView", () => {
 
     await waitFor(() => expect(mockedDeleteNote).toHaveBeenCalledWith("n1"));
   });
+
+  it("shows an error message instead of crashing when the notes request fails (e.g. a misrouted API response)", async () => {
+    mockedListNotes.mockRejectedValue(new Error("not JSON"));
+    render(<NotesView />);
+
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", expect.stringContaining("메모를 불러오지 못했습니다"));
+    // The rest of the panel (e.g. the "+ 새 메모" button) still rendered —
+    // a failed fetch never leaves `notes` as something other than an array.
+    expect(screen.getByRole("button", { name: "+ 새 메모" })).toBeTruthy();
+  });
 });

@@ -32,11 +32,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     return undefined as T;
   }
-  const body = await res.json().catch(() => undefined);
+  const parsed = await res.json().then(
+    (value) => ({ ok: true as const, value }),
+    () => ({ ok: false as const, value: undefined }),
+  );
   if (!res.ok) {
-    throw new ApiError(res.status, body);
+    throw new ApiError(res.status, parsed.value);
   }
-  return body as T;
+  if (!parsed.ok) {
+    // A 2xx status with a body that isn't valid JSON means we didn't
+    // actually reach the API (e.g. a misrouted "/api/*" request hitting
+    // the SPA's own index.html instead). Surfacing this as a thrown
+    // ApiError keeps callers' existing error handling in charge, instead
+    // of letting `undefined` silently masquerade as a valid response.
+    throw new ApiError(res.status, undefined);
+  }
+  return parsed.value as T;
 }
 
 export interface Player {
