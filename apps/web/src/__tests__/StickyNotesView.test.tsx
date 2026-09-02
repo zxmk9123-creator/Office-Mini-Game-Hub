@@ -1062,4 +1062,167 @@ describe("StickyNotesView", () => {
       expect(mockedCreateStickyNote).not.toHaveBeenCalled();
     });
   });
+
+  describe("rich text formatting", () => {
+    function setSelection(el: HTMLTextAreaElement, start: number, end: number) {
+      el.selectionStart = start;
+      el.selectionEnd = end;
+    }
+
+    it("toggles bold with Ctrl+B on the current selection", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello world" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+
+      setSelection(textarea, 0, 5);
+      fireEvent.keyDown(textarea, { key: "b", ctrlKey: true });
+
+      expect(textarea.value).toBe("**hello** world");
+    });
+
+    it("toggles italic with Ctrl+I on the current selection", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello world" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+
+      setSelection(textarea, 6, 11);
+      fireEvent.keyDown(textarea, { key: "i", ctrlKey: true });
+
+      expect(textarea.value).toBe("hello _world_");
+    });
+
+    it("toggles strikethrough with Ctrl+X on the current selection", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello world" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+
+      setSelection(textarea, 0, 11);
+      fireEvent.keyDown(textarea, { key: "x", ctrlKey: true });
+
+      expect(textarea.value).toBe("~~hello world~~");
+    });
+
+    it("Ctrl+X does not cut/delete the selected text — it wraps it instead", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello world" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+
+      setSelection(textarea, 0, 11);
+      const notCancelled = fireEvent.keyDown(textarea, { key: "x", ctrlKey: true });
+
+      // fireEvent's return value is false when preventDefault() was called.
+      expect(notCancelled).toBe(false);
+      expect(textarea.value).toContain("hello world");
+    });
+
+    it("a plain Ctrl+X with no other formatting context is still intercepted as strikethrough inside the editor", async () => {
+      // Within the Sticky Note content editor, Ctrl+X is always the
+      // strikethrough shortcut — there is no separate "just cut" mode to
+      // distinguish here; native cut is only preserved outside this editor.
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "abc" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+      setSelection(textarea, 0, 3);
+
+      fireEvent.keyDown(textarea, { key: "x", ctrlKey: true });
+      expect(textarea.value).toBe("~~abc~~");
+    });
+
+    it("combines bold, italic, and strikethrough on the same text", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+
+      setSelection(textarea, 0, 5);
+      fireEvent.keyDown(textarea, { key: "b", ctrlKey: true });
+      fireEvent.keyDown(textarea, { key: "i", ctrlKey: true });
+      fireEvent.keyDown(textarea, { key: "x", ctrlKey: true });
+
+      expect(textarea.value).toBe("**_~~hello~~_**");
+    });
+
+    it("toolbar buttons apply the same formatting without losing the selection", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello world" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+      setSelection(textarea, 0, 5);
+
+      fireEvent.click(screen.getByRole("button", { name: "굵게" }));
+
+      expect(textarea.value).toBe("**hello** world");
+    });
+
+    it("does not start a drag when a formatting shortcut is used", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+      setSelection(textarea, 0, 5);
+
+      fireEvent.keyDown(textarea, { key: "b", ctrlKey: true });
+
+      expect(noteEl.style.left).toBe("100px");
+      expect(noteEl.style.top).toBe("60px");
+    });
+
+    it("does not toggle formatting when Ctrl+B is dispatched outside the content editor", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+
+      fireEvent.keyDown(noteEl, { key: "b", ctrlKey: true });
+
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+      expect(textarea.value).toBe("hello");
+    });
+
+    it("persists formatted content through the existing save path on blur", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "hello world" }]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, content: "**hello** world" });
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+
+      setSelection(textarea, 0, 5);
+      fireEvent.keyDown(textarea, { key: "b", ctrlKey: true });
+      fireEvent.blur(textarea);
+
+      await waitFor(() =>
+        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { content: "**hello** world" }),
+      );
+    });
+
+    it("renders formatting in the read-only preview once persisted, e.g. after a remount/refetch", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "**bold** and _italic_ and ~~strike~~" }]);
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+
+      const preview = await screen.findByTestId("sticky-note-preview-s1");
+      expect(preview.querySelector("strong")?.textContent).toBe("bold");
+      expect(preview.querySelector("em")?.textContent).toBe("italic");
+      expect(preview.querySelector("s")?.textContent).toBe("strike");
+    });
+
+    it("remains correctly formatted after switching views and back (remount preserves the persisted markers)", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, content: "**bold**" }]);
+      const { rerender } = render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      await screen.findByTestId("sticky-note-preview-s1");
+
+      rerender(<StickyNotesView active={false} boardRef={boardRef} session={testSession} />);
+      rerender(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+
+      const preview = await screen.findByTestId("sticky-note-preview-s1");
+      expect(preview.querySelector("strong")?.textContent).toBe("bold");
+    });
+
+    it("existing plain-text notes with no formatting markers remain fully compatible", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]); // "buy milk", no markers
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+
+      const preview = await screen.findByTestId("sticky-note-preview-s1");
+      expect(preview.textContent).toBe("buy milk");
+      expect(preview.querySelector("strong, em, s")).toBeNull();
+
+      const textarea = (await screen.findByLabelText("스티커 메모 내용")) as HTMLTextAreaElement;
+      expect(textarea.value).toBe("buy milk");
+    });
+  });
 });

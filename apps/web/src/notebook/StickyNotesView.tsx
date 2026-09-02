@@ -5,6 +5,17 @@ import { NicknameEntry } from "../player/NicknameEntry";
 import type { PlayerSession } from "../player/usePlayerSession";
 import type { StickyNoteColor, StickyNoteDto } from "../api/client";
 import { clampPosition, clampSize, contentAwareHeight, rectsIntersect } from "./stickyNoteLayout";
+import {
+  renderStickyNoteFormattedHtml,
+  toggleStickyNoteFormat,
+  type StickyNoteFormat,
+} from "./stickyNoteFormatting";
+
+const FORMAT_BUTTONS: { format: StickyNoteFormat; label: string; glyph: string; shortcutKey: string }[] = [
+  { format: "bold", label: "굵게", glyph: "B", shortcutKey: "b" },
+  { format: "italic", label: "기울임", glyph: "I", shortcutKey: "i" },
+  { format: "strike", label: "취소선", glyph: "S", shortcutKey: "x" },
+];
 
 const COLORS: StickyNoteColor[] = ["yellow", "pink", "blue", "green", "purple"];
 
@@ -100,6 +111,16 @@ function StickyNoteCard({
   const resizeStateRef = useRef<ResizeState | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [textareaContentHeight, setTextareaContentHeight] = useState(0);
+  // While not actively being edited, a formatted read-only preview is
+  // shown instead of the raw textarea (which can only ever show plain
+  // characters, markers included) — this is how formatting becomes
+  // visible without replacing the textarea itself.
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  // Set by a format toggle so the next paint can restore the textarea's
+  // selection around the (now shifted) marker characters — a plain
+  // assignment during the event handler wouldn't survive React's
+  // re-render with the new controlled `value`.
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
 
   const persistedPosition = clampPosition(note.x, note.y, viewportWidth, viewportHeight);
   const position = dragPosition ?? persistedPosition;
@@ -127,6 +148,48 @@ function StickyNoteCard({
     setTextareaContentHeight(el.scrollHeight);
     el.style.height = previousHeight;
   }, [content, size.width]);
+
+  // Restores the textarea's selection around the shifted marker
+  // characters after a format toggle re-renders the controlled `value`.
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    const el = textareaRef.current;
+    if (!pending || !el) {
+      return;
+    }
+    pendingSelectionRef.current = null;
+    el.setSelectionRange(pending.start, pending.end);
+  }, [content]);
+
+  const applyFormat = (format: StickyNoteFormat) => {
+    const el = textareaRef.current;
+    if (!el) {
+      return;
+    }
+    const result = toggleStickyNoteFormat(content, el.selectionStart, el.selectionEnd, format);
+    pendingSelectionRef.current = { start: result.start, end: result.end };
+    setContent(result.text);
+  };
+
+  const handleContentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const withModifier = e.ctrlKey || e.metaKey;
+    if (!withModifier) {
+      return;
+    }
+    const key = e.key.toLowerCase();
+    const button = FORMAT_BUTTONS.find((b) => b.shortcutKey === key);
+    if (!button) {
+      // Not one of our shortcuts — leave every other Ctrl/Cmd combination
+      // (copy, paste, undo, select-all, and a plain Ctrl+X used for an
+      // actual cut when nothing else matches) completely alone.
+      return;
+    }
+    // Only ever preempts the browser default (Ctrl+X's cut included) when
+    // the key combination is genuinely being interpreted as one of our
+    // three format shortcuts.
+    e.preventDefault();
+    applyFormat(button.format);
+  };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Interactive controls (buttons), the editable textarea, and the resize
@@ -315,17 +378,73 @@ function StickyNoteCard({
           삭제
         </button>
       </div>
-      <textarea
-        ref={textareaRef}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onBlur={() => {
-          if (content !== note.content) onSaveContent(content);
-        }}
-        placeholder="내용을 입력하세요…"
-        aria-label="스티커 메모 내용"
-        className="min-h-0 flex-1 cursor-text resize-none bg-transparent text-sm text-neutral-800 outline-none"
-      />
+      {/*
+        onMouseDown preventDefault keeps focus (and the current text
+        selection) on the textarea instead of shifting to the button —
+        without it, clicking a format button would blur the textarea
+        first and the selection needed to apply the format would already
+        be gone by the time onClick ran.
+      */}
+      <div className="flex gap-0.5">
+        {FORMAT_BUTTONS.map(({ format, label, glyph }) => (
+          <button
+            key={format}
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormat(format)}
+            aria-label={label}
+            title={`${label} (Ctrl+${FORMAT_BUTTONS.find((b) => b.format === format)!.shortcutKey.toUpperCase()})`}
+            className={`h-4 w-4 rounded text-[10px] font-semibold leading-4 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 ${
+              format === "italic" ? "italic" : format === "strike" ? "line-through" : ""
+            }`}
+          >
+            {glyph}
+          </button>
+        ))}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {/*
+          The textarea always stays in normal flow (visibility:hidden
+          only, never repositioned) so its own box/size is completely
+          unaffected by isEditingContent — the auto-height measurement
+          effect above depends on this element's layout being exactly as
+          it was before formatting existed. The preview is the one that's
+          absolutely positioned, layered on top of it.
+        */}
+        <textarea
+          ref={textareaRef}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          onKeyDown={handleContentKeyDown}
+          onFocus={() => setIsEditingContent(true)}
+          onBlur={() => {
+            setIsEditingContent(false);
+            if (content !== note.content) onSaveContent(content);
+          }}
+          placeholder="내용을 입력하세요… (**굵게**, _기울임_, ~~취소선~~)"
+          aria-label="스티커 메모 내용"
+          className={`h-full min-h-0 w-full cursor-text resize-none bg-transparent text-sm text-neutral-800 outline-none ${
+            isEditingContent ? "" : "invisible"
+          }`}
+        />
+        {!isEditingContent && (
+          <div
+            data-testid={`sticky-note-preview-${note.id}`}
+            onClick={() => textareaRef.current?.focus()}
+            className="absolute inset-0 cursor-text overflow-hidden whitespace-pre-wrap break-words text-sm text-neutral-800"
+          >
+            {content ? (
+              // Safe: renderStickyNoteFormattedHtml HTML-escapes the raw
+              // content first and only reintroduces our own <strong>/<em>/
+              // <s> tags for the marker patterns it recognizes — no
+              // arbitrary user input ever becomes live markup.
+              <span dangerouslySetInnerHTML={{ __html: renderStickyNoteFormattedHtml(content) }} />
+            ) : (
+              <span className="text-neutral-400">내용을 입력하세요… (**굵게**, _기울임_, ~~취소선~~)</span>
+            )}
+          </div>
+        )}
+      </div>
       <div className="flex items-center justify-between">
         <div className="flex gap-1">
           {COLORS.map((color) => (
