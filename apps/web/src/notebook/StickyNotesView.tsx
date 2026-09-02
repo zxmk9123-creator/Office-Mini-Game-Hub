@@ -447,7 +447,14 @@ export function StickyNotesView({
               <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
               <button
                 type="button"
-                onClick={() => create(viewportWidth, viewportHeight)}
+                onClick={() => {
+                  const rect = boardRef.current?.getBoundingClientRect();
+                  create(
+                    viewportWidth,
+                    viewportHeight,
+                    rect ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height } : null,
+                  );
+                }}
                 className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
               >
                 + 새 스티커

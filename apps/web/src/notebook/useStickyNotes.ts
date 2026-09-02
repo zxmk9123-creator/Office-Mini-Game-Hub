@@ -7,13 +7,14 @@ import {
   type StickyNoteColor,
   type StickyNoteDto,
 } from "../api/client";
-import { cascadePosition } from "./stickyNoteLayout";
+import { DEFAULT_STICKY_NOTE_SIZE, findStickyNoteSpawnPosition, type Rect } from "./stickyNoteLayout";
 
 export interface StickyNotesState {
   stickyNotes: StickyNoteDto[];
   loading: boolean;
   error: string | null;
-  create: (viewportWidth: number, viewportHeight: number) => Promise<void>;
+  /** `boardRect` is the Main Board's real, currently-measured bounding rect (or null if not available/off-screen). */
+  create: (viewportWidth: number, viewportHeight: number, boardRect: Rect | null) => Promise<void>;
   saveContent: (id: string, content: string) => Promise<void>;
   toggleLocked: (id: string, locked: boolean) => Promise<void>;
   setColor: (id: string, color: StickyNoteColor) => Promise<void>;
@@ -62,20 +63,40 @@ export function useStickyNotes(playerId: string | null): StickyNotesState {
   }, [refresh]);
 
   const create = useCallback(
-    async (viewportWidth: number, viewportHeight: number) => {
+    async (viewportWidth: number, viewportHeight: number, boardRect: Rect | null) => {
       if (!playerId) {
         return;
       }
       setError(null);
+
+      // Real, current geometry only: every other note's actual persisted
+      // rect (locked ones included — they still occupy space) plus the
+      // Main Board's real rect. Never hardcoded, never a stale cache.
+      const obstacles: Rect[] = stickyNotes.map((n) => ({ x: n.x, y: n.y, width: n.width, height: n.height }));
+      if (boardRect) {
+        obstacles.push(boardRect);
+      }
+      const position = findStickyNoteSpawnPosition(
+        DEFAULT_STICKY_NOTE_SIZE,
+        obstacles,
+        viewportWidth,
+        viewportHeight,
+      );
+      if (!position) {
+        // No free spot anywhere — fail loudly rather than create an
+        // overlapping note. No API call is made in this case.
+        setError("스티커 메모를 놓을 공간이 없습니다. 메모를 정리한 후 다시 시도하세요.");
+        return;
+      }
+
       try {
-        const { x, y } = cascadePosition(stickyNotes.length, viewportWidth, viewportHeight);
-        const stickyNote = await createStickyNote({ playerId, content: "", x, y });
+        const stickyNote = await createStickyNote({ playerId, content: "", x: position.x, y: position.y });
         setStickyNotes((prev) => [stickyNote, ...prev]);
       } catch {
         setError("스티커 메모를 만들지 못했습니다.");
       }
     },
-    [playerId, stickyNotes.length],
+    [playerId, stickyNotes],
   );
 
   const applyUpdate = useCallback(

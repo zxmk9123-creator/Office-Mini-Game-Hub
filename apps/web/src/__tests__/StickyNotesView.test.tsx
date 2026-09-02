@@ -916,4 +916,150 @@ describe("StickyNotesView", () => {
       expect(mockedListStickyNotes).toHaveBeenCalledWith("player-2");
     });
   });
+
+  describe("collision-aware random spawn position", () => {
+    function stubBoardRect(
+      ref: React.RefObject<HTMLDivElement>,
+      rect: { left: number; top: number; width: number; height: number },
+    ) {
+      if (!ref.current) {
+        throw new Error("board ref not mounted");
+      }
+      ref.current.getBoundingClientRect = () =>
+        ({
+          ...rect,
+          right: rect.left + rect.width,
+          bottom: rect.top + rect.height,
+          x: rect.left,
+          y: rect.top,
+          toJSON() {
+            return this;
+          },
+        }) as DOMRect;
+    }
+
+    it("creating multiple notes produces varied positions", async () => {
+      mockedListStickyNotes.mockResolvedValue([]);
+      let nextId = 1;
+      mockedCreateStickyNote.mockImplementation(async (input) => ({
+        ...NOTE_A,
+        id: `new-${nextId++}`,
+        x: input.x ?? 0,
+        y: input.y ?? 0,
+      }));
+
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      await screen.findByText(/아직 스티커 메모가 없습니다/);
+      const createButton = screen.getByRole("button", { name: "+ 새 스티커" });
+
+      for (let i = 0; i < 5; i++) {
+        fireEvent.click(createButton);
+        await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalledTimes(i + 1));
+      }
+
+      const positions = new Set(
+        mockedCreateStickyNote.mock.calls.map((call) => `${call[0].x},${call[0].y}`),
+      );
+      expect(positions.size).toBeGreaterThan(1);
+    });
+
+    it("a newly created note never overlaps an existing note", async () => {
+      const existing = { ...NOTE_A, x: 100, y: 100, width: 200, height: 160 };
+      mockedListStickyNotes.mockResolvedValue([existing]);
+      mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, id: "new-1", x: 0, y: 0 });
+
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      await screen.findByTestId("sticky-note-s1");
+      fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
+
+      await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalled());
+      const { x, y } = mockedCreateStickyNote.mock.calls[0][0];
+      const noOverlap = x! + 200 <= existing.x || existing.x + existing.width <= x! || y! + 160 <= existing.y ||
+        existing.y + existing.height <= y!;
+      expect(noOverlap).toBe(true);
+    });
+
+    it("a newly created note never overlaps the Main Board", async () => {
+      mockedListStickyNotes.mockResolvedValue([]);
+      mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, id: "new-1", x: 0, y: 0 });
+      const ref = createRef<HTMLDivElement>();
+      render(
+        <>
+          <div ref={ref} data-testid="board" />
+          <StickyNotesView active boardRef={ref} session={testSession} />
+        </>,
+      );
+      await screen.findByText(/아직 스티커 메모가 없습니다/);
+      // Board occupies most of the viewport but leaves a genuinely wide
+      // enough clear strip (324px right, well over the 200px note width).
+      stubBoardRect(ref, { left: 0, top: 0, width: 700, height: 768 });
+
+      fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
+      await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalled());
+
+      const { x, y } = mockedCreateStickyNote.mock.calls[0][0];
+      const board = { x: 0, y: 0, width: 700, height: 768 };
+      const noOverlap = x! + 200 <= board.x || board.x + board.width <= x! || y! + 160 <= board.y ||
+        board.y + board.height <= y!;
+      expect(noOverlap).toBe(true);
+    });
+
+    it("can still create a note when an existing note is locked at the default spawn location", async () => {
+      const lockedAtDefault = { ...NOTE_A, id: "locked-1", x: 24, y: 24, width: 200, height: 160, locked: true };
+      mockedListStickyNotes.mockResolvedValue([lockedAtDefault]);
+      mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, id: "new-1", x: 500, y: 500 });
+
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      await screen.findByTestId("sticky-note-locked-1");
+      fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
+
+      await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalled());
+      const { x, y } = mockedCreateStickyNote.mock.calls[0][0];
+      const noOverlap =
+        x! + 200 <= lockedAtDefault.x ||
+        lockedAtDefault.x + lockedAtDefault.width <= x! ||
+        y! + 160 <= lockedAtDefault.y ||
+        lockedAtDefault.y + lockedAtDefault.height <= y!;
+      expect(noOverlap).toBe(true);
+    });
+
+    it("existing notes never move as a side effect of creating another note", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, id: "new-1", x: 500, y: 500 });
+
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const existingEl = await screen.findByTestId("sticky-note-s1");
+      expect(existingEl.style.left).toBe("100px");
+      expect(existingEl.style.top).toBe("60px");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
+      await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalled());
+
+      expect(mockedUpdatePositionCallsFor("s1")).toHaveLength(0);
+      expect(screen.getByTestId("sticky-note-s1").style.left).toBe("100px");
+      expect(screen.getByTestId("sticky-note-s1").style.top).toBe("60px");
+
+      function mockedUpdatePositionCallsFor(id: string) {
+        return mockedUpdateStickyNote.mock.calls.filter((call) => call[0] === id);
+      }
+    });
+
+    it("fails gracefully with an error message instead of creating an overlapping note when no space is left", async () => {
+      // Tile the entire viewport with existing notes so nothing fits.
+      const jammedNotes = [];
+      for (let y = 0; y < 768; y += 160) {
+        for (let x = 0; x < 1024; x += 200) {
+          jammedNotes.push({ ...NOTE_A, id: `n-${x}-${y}`, x, y, width: 200, height: 160 });
+        }
+      }
+      mockedListStickyNotes.mockResolvedValue(jammedNotes);
+
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      await screen.findByTestId(`sticky-note-${jammedNotes[0].id}`);
+      fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
+
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(mockedCreateStickyNote).not.toHaveBeenCalled();
+    });
+  });
 });

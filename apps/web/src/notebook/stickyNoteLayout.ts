@@ -113,7 +113,13 @@ export function rectsIntersect(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
-/** A simple deterministic cascade: note #0 at the default position, each next one nudged diagonally, wrapping. */
+/**
+ * A simple deterministic cascade: note #0 at the default position, each
+ * next one nudged diagonally, wrapping. Kept as the last-resort default
+ * spawn behavior described in the spec, but no longer used to place new
+ * notes directly — see findStickyNoteSpawnPosition, which never places a
+ * note somewhere it would overlap another note or the Main Board.
+ */
 export function cascadePosition(
   index: number,
   viewportWidth: number,
@@ -123,4 +129,70 @@ export function cascadePosition(
   const x = DEFAULT_STICKY_NOTE_POSITION.x + step * CREATE_CASCADE_STEP;
   const y = DEFAULT_STICKY_NOTE_POSITION.y + step * CREATE_CASCADE_STEP;
   return clampPosition(x, y, viewportWidth, viewportHeight);
+}
+
+/**
+ * Finds a spawn position for a new note of the given size such that the
+ * entire note rectangle fits within [0, viewportWidth] x [0, viewportHeight]
+ * and does not overlap any of `obstacles` (existing notes — locked ones
+ * included, since a locked note is still occupying real space — and the
+ * Main Board's real rect, all supplied by the caller from actual DOM/state
+ * geometry, never hardcoded here).
+ *
+ * Strategy: a bounded number of random candidates first, so repeated
+ * creates land in varied spots (requirement: "varied positions") rather
+ * than a fixed pattern; if none of those land clear (crowded canvas), a
+ * deterministic top-left-to-bottom-right grid scan finds the first free
+ * spot instead of giving up — this is the "nearest/first valid position"
+ * fallback, and it's exhaustive enough that a real gap is never missed
+ * for a typical canvas/note size. Returns null only when no position
+ * anywhere in bounds is free of every obstacle (including when the note
+ * itself is larger than the viewport) — the caller must not fall back to
+ * an overlapping position in that case.
+ */
+export function findStickyNoteSpawnPosition(
+  size: { width: number; height: number },
+  obstacles: Rect[],
+  viewportWidth: number,
+  viewportHeight: number,
+  options: { randomAttempts?: number; gridStep?: number; random?: () => number } = {},
+): { x: number; y: number } | null {
+  const maxX = viewportWidth - size.width;
+  const maxY = viewportHeight - size.height;
+  if (maxX < 0 || maxY < 0) {
+    return null;
+  }
+
+  const fits = (x: number, y: number): boolean => {
+    const candidate: Rect = { x, y, width: size.width, height: size.height };
+    return !obstacles.some((obstacle) => rectsIntersect(candidate, obstacle));
+  };
+
+  const randomAttempts = options.randomAttempts ?? 30;
+  const random = options.random ?? Math.random;
+  for (let attempt = 0; attempt < randomAttempts; attempt++) {
+    const x = Math.round(random() * maxX);
+    const y = Math.round(random() * maxY);
+    if (fits(x, y)) {
+      return { x, y };
+    }
+  }
+
+  // Deterministic fallback: scan a grid from the top-left for the first
+  // free spot, rather than ever place an overlapping note.
+  const gridStep = options.gridStep ?? 20;
+  for (let y = 0; y <= maxY; y += gridStep) {
+    for (let x = 0; x <= maxX; x += gridStep) {
+      if (fits(x, y)) {
+        return { x, y };
+      }
+    }
+  }
+  // The step grid can skip the exact bottom/right edge when it doesn't
+  // divide evenly into maxX/maxY — check that corner explicitly too.
+  if (fits(maxX, maxY)) {
+    return { x: maxX, y: maxY };
+  }
+
+  return null;
 }
