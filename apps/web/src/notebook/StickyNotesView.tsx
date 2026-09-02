@@ -87,7 +87,7 @@ function StickyNoteCard({
   onSetColor: (color: StickyNoteColor) => void;
   onDelete: () => void;
   onPositionCommit: (x: number, y: number) => void;
-  onSizeCommit: (width: number, height: number) => void;
+  onSizeCommit: (width: number, height: number) => Promise<void>;
 }) {
   const [content, setContent] = useState(note.content);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
@@ -101,23 +101,48 @@ function StickyNoteCard({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [textareaContentHeight, setTextareaContentHeight] = useState(0);
 
+  // Non-null for exactly the duration of an active resize gesture (from
+  // pointerdown on the handle to its pointerup/cancel).
+  const isResizing = resizeSize !== null;
+
   const persistedPosition = clampPosition(note.x, note.y, viewportWidth, viewportHeight);
   const position = dragPosition ?? persistedPosition;
+  // `size` is the base/persisted height — either the note's own stored
+  // height, or (while a resize is in progress) the live dragged value.
+  // This is the "manual resize = base height" half of the split; Auto
+  // Height (below) never writes into this.
   const size = resizeSize ?? { width: note.width, height: note.height };
-  // Step function, not a continuous one: stays exactly at the persisted/
-  // dragged base height while the content still fits inside it, and only
-  // expands once the content genuinely needs more room — never overwrites
-  // that base height. A purely visual overlay recomputed from the
-  // textarea's own natural content size (never from an API response,
-  // never sent to the server, unaffected by the note's locked state).
-  const renderHeight = contentAwareHeight(size.height, textareaContentHeight);
+  // Auto Height's rendered height. A step function, not a continuous one:
+  // stays exactly at the base height while the content still fits inside
+  // it, and only expands once the content genuinely needs more room —
+  // never overwrites the base height itself. A purely visual overlay
+  // recomputed from the textarea's own natural content size (never from
+  // an API response, never sent to the server, unaffected by locked).
+  //
+  // While the user is actively dragging the resize handle, Auto Height
+  // steps aside entirely and the note simply tracks the pointer 1:1
+  // (`size.height`, the live dragged value) — applying the content-aware
+  // step function mid-drag would fight the gesture: it could refuse to
+  // shrink below the content's required height, or jump around as the
+  // width (and therefore text wrapping) changes on a diagonal drag.
+  // Auto Height resumes, based on the new base height, the moment the
+  // gesture ends (`isResizing` goes false and `size` falls back to the
+  // persisted height).
+  const renderHeight = isResizing ? size.height : contentAwareHeight(size.height, textareaContentHeight);
 
   // Measures how tall the textarea's content actually needs to be, using
   // the standard auto-grow-textarea trick (shrink to `auto` to get a true
   // scrollHeight reading, then restore) — re-run only when content or
   // width changes, never from a ResizeObserver, so there's no feedback
-  // loop and no risk of it firing on every render.
+  // loop and no risk of it firing on every render. Skipped entirely while
+  // a resize gesture is active: its result isn't used in `renderHeight`
+  // during a resize anyway (see above), and measuring mid-drag is exactly
+  // the kind of immediate overwrite of the dragged height this is meant
+  // to avoid.
   useLayoutEffect(() => {
+    if (isResizing) {
+      return;
+    }
     const el = textareaRef.current;
     if (!el) {
       return;
@@ -126,7 +151,7 @@ function StickyNoteCard({
     el.style.height = "auto";
     setTextareaContentHeight(el.scrollHeight);
     el.style.height = previousHeight;
-  }, [content, size.width]);
+  }, [content, size.width, isResizing]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Interactive controls (buttons), the editable textarea, and the resize
@@ -239,7 +264,7 @@ function StickyNoteCard({
     );
   };
 
-  const endResize = (e: React.PointerEvent<HTMLDivElement>) => {
+  const endResize = async (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
     const resize = resizeStateRef.current;
     if (!resize || resize.pointerId !== e.pointerId) {
@@ -250,10 +275,23 @@ function StickyNoteCard({
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
     const finalSize = resizeSize;
-    setResizeSize(null);
     if (finalSize && (finalSize.width !== note.width || finalSize.height !== note.height)) {
-      onSizeCommit(finalSize.width, finalSize.height);
+      // Deliberately kept in place (not nulled) until the commit settles,
+      // success or failure: `onSizeCommit` is a PATCH round-trip, and
+      // `note.width`/`note.height` only reflect the new size once it
+      // resolves. Nulling `resizeSize` immediately would make `size` fall
+      // back to the still-stale `note.width`/`height` for that gap, which
+      // Auto Height would then (correctly, but visibly) recompute against
+      // — a snap-back to the pre-resize size followed by a snap-forward
+      // once the response lands. Awaiting it keeps the just-dragged size
+      // on screen for that entire gap; once it settles, `note` is either
+      // the new size (success) or unchanged (failure — `onSizeCommit`
+      // itself swallows the error into the existing error banner), and
+      // falling back to `note.width`/`height` at that point is correct
+      // either way.
+      await onSizeCommit(finalSize.width, finalSize.height);
     }
+    setResizeSize(null);
   };
 
   return (

@@ -419,7 +419,7 @@ describe("StickyNotesView", () => {
       await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { width: 240, height: 200 }));
     });
 
-    it("manual resize cannot visually shrink the note below the height its content requires", async () => {
+    it("Auto Height does not fight an active resize: the note tracks the pointer even below what content needs", async () => {
       mockedListStickyNotes.mockResolvedValue([NOTE_A]);
       render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
       const noteEl = await screen.findByTestId("sticky-note-s1");
@@ -431,10 +431,68 @@ describe("StickyNotesView", () => {
       await waitFor(() => expect(Number.parseFloat(noteEl.style.height)).toBeGreaterThanOrEqual(564));
 
       // Drag the handle far up-left, well below what the content needs.
+      // While the gesture is active, Auto Height must step aside entirely
+      // — the note simply follows the pointer, exactly like resizing with
+      // short content — so the drag itself never feels blocked or fought.
       firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
       firePointer(handle, "pointermove", { clientX: -5000, clientY: -5000 });
 
-      expect(Number.parseFloat(noteEl.style.height)).toBeGreaterThanOrEqual(564);
+      expect(Number.parseFloat(noteEl.style.height)).toBeLessThan(200);
+    });
+
+    it("recalculates Auto Height from the new base height once the resize gesture ends", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      // Dragged far up-left, width/height both clamp to their minimums
+      // (180x120) rather than going negative.
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, width: 180, height: 120 });
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      // Long content needs 500 (stubbed scrollHeight) + 64 chrome = 564px.
+      fireEvent.change(textarea, { target: { value: "x".repeat(200) } });
+      await waitFor(() => expect(Number.parseFloat(noteEl.style.height)).toBeGreaterThanOrEqual(564));
+
+      // Drag down to the minimum height and release — a genuinely smaller
+      // base height the user asked for.
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: -5000, clientY: -5000 });
+      firePointer(handle, "pointerup", { clientX: -5000, clientY: -5000 });
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", "player-1", { width: 180, height: 120 }));
+
+      // Once the gesture ends and the smaller base height is persisted,
+      // Auto Height resumes — the content still doesn't fit, so it renders
+      // taller than the new base again (never clips), but never overrides
+      // the base height itself.
+      await waitFor(() => expect(Number.parseFloat(noteEl.style.height)).toBeGreaterThanOrEqual(564));
+    });
+
+    it("does not snap the note back to its stale size while the resize commit is still in flight", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      let resolveCommit!: (note: typeof NOTE_A) => void;
+      mockedUpdateStickyNote.mockReturnValue(
+        new Promise((resolve) => {
+          resolveCommit = resolve;
+        }),
+      );
+      render(<StickyNotesView active boardRef={boardRef} session={testSession} />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+      firePointer(handle, "pointerup", { clientX: 340, clientY: 300 });
+
+      // The commit hasn't resolved yet, so `note.height` is still the old
+      // 160px — the note must keep showing the just-dragged 200px rather
+      // than falling back to the stale persisted value in the meantime.
+      expect(noteEl.style.width).toBe("240px");
+      expect(noteEl.style.height).toBe("200px");
+
+      resolveCommit({ ...NOTE_A, width: 240, height: 200 });
+      await waitFor(() => expect(noteEl.style.width).toBe("240px"));
+      expect(noteEl.style.height).toBe("200px");
     });
   });
 
