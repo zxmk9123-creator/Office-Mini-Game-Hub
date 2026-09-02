@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { NotesView } from "./notebook/NotesView";
 import { StickyNotesView } from "./notebook/StickyNotesView";
 import { ToolsList } from "./tools/ToolsList";
@@ -19,6 +19,10 @@ export default function App() {
   const session = usePlayerSession();
   const [section, setSection] = useState<Section>("notes");
   const [toolScreen, setToolScreen] = useState<ToolScreen>("list");
+  // The Main Board panel's real DOM node — measured live via
+  // getBoundingClientRect() wherever a Sticky Note needs to avoid it,
+  // never hardcoded, so it stays correct if the panel ever moves/resizes.
+  const boardRef = useRef<HTMLDivElement>(null);
 
   const selectSection = (next: Section) => {
     setSection(next);
@@ -27,36 +31,44 @@ export default function App() {
     }
   };
 
-  let body: React.ReactNode;
+  // Sticky Notes has no entry here: <StickyNotesView> below is always
+  // mounted (its `active` prop only toggles its control panel's
+  // visibility) precisely so switching sections never unmounts it —
+  // that unmount/remount was the root cause of notes appearing to reset
+  // when leaving and returning to the 스티커 메모 tab.
+  let body: React.ReactNode = null;
   if (section === "notes") {
     body = <NotesView />;
-  } else if (section === "sticky-notes") {
-    body = <StickyNotesView />;
-  } else if (toolScreen === "reaction-test") {
-    if (!session.playerId || !session.nickname) {
-      body = <NicknameEntry session={session} />;
+  } else if (section === "tools") {
+    if (toolScreen === "reaction-test") {
+      if (!session.playerId || !session.nickname) {
+        body = <NicknameEntry session={session} />;
+      } else {
+        body = (
+          <ReactionTestView
+            playerId={session.playerId}
+            nickname={session.nickname}
+            onHome={() => setToolScreen("list")}
+          />
+        );
+      }
     } else {
       body = (
-        <ReactionTestView
-          playerId={session.playerId}
+        <ToolsList
           nickname={session.nickname}
-          onHome={() => setToolScreen("list")}
+          onSelectGame={() => setToolScreen("reaction-test")}
+          onSwitchPlayer={() => session.clearPlayer()}
         />
       );
     }
-  } else {
-    body = (
-      <ToolsList
-        nickname={session.nickname}
-        onSelectGame={() => setToolScreen("reaction-test")}
-        onSwitchPlayer={() => session.clearPlayer()}
-      />
-    );
   }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-100 p-2">
-      <div className="relative z-10 flex h-[560px] max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div
+        ref={boardRef}
+        className="relative z-10 flex h-[560px] max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm"
+      >
         <header className="flex items-center border-b border-neutral-200 px-3 py-2">
           <h1 className="text-sm font-semibold text-neutral-800">메모장</h1>
         </header>
@@ -77,7 +89,10 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <main className="min-h-0 flex-1 overflow-y-auto">{body}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          {body}
+          <StickyNotesView active={section === "sticky-notes"} boardRef={boardRef} />
+        </main>
       </div>
     </div>
   );

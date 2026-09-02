@@ -96,6 +96,23 @@ export function contentAwareHeight(baseHeight: number, contentRequiredHeight: nu
   return requiredHeight + STICKY_NOTE_CHROME_HEIGHT;
 }
 
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * True if two axis-aligned rectangles overlap at all (merely touching
+ * edges — zero-area overlap — does not count). Used to keep a dragged
+ * sticky note out of the Main Board's real, currently-rendered
+ * bounding rect — never a hardcoded region.
+ */
+export function rectsIntersect(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
 /** A simple deterministic cascade: note #0 at the default position, each next one nudged diagonally, wrapping. */
 export function cascadePosition(
   index: number,

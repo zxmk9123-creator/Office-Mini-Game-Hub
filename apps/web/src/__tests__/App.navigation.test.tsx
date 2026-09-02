@@ -72,4 +72,42 @@ describe("App navigation", () => {
     expect(await screen.findByText("Click the target the moment it appears.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Start" })).toBeTruthy();
   });
+
+  it("a sticky note survives switching to Notes/Tools and back to Sticky Notes (no reset, no refetch)", async () => {
+    vi.mocked(listStickyNotes).mockResolvedValue([
+      {
+        id: "s1",
+        content: "keep me",
+        color: "yellow",
+        pinned: false,
+        locked: false,
+        x: 100,
+        y: 60,
+        width: 200,
+        height: 160,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    render(<App />);
+    await screen.findByText(/아직 메모가 없습니다/);
+
+    fireEvent.click(screen.getByRole("button", { name: "스티커 메모" }));
+    expect(await screen.findByTestId("sticky-note-s1")).toBeTruthy();
+    expect(vi.mocked(listStickyNotes)).toHaveBeenCalledTimes(1);
+
+    // Switch away to Notes, then Tools, then back — the sticky note must
+    // still be present the whole time, never removed or refetched.
+    fireEvent.click(screen.getByRole("button", { name: "메모" }));
+    expect(screen.getByTestId("sticky-note-s1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "도구" }));
+    expect(screen.getByTestId("sticky-note-s1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "스티커 메모" }));
+    expect(screen.getByTestId("sticky-note-s1")).toBeTruthy();
+    expect((screen.getByLabelText("스티커 메모 내용") as HTMLTextAreaElement).value).toBe("keep me");
+    expect(vi.mocked(listStickyNotes)).toHaveBeenCalledTimes(1);
+  });
 });

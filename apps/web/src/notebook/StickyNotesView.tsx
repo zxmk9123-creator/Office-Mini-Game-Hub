@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { useStickyNotes } from "./useStickyNotes";
 import type { StickyNoteColor, StickyNoteDto } from "../api/client";
-import { clampPosition, clampSize, contentAwareHeight } from "./stickyNoteLayout";
+import { clampPosition, clampSize, contentAwareHeight, rectsIntersect } from "./stickyNoteLayout";
 
 const COLORS: StickyNoteColor[] = ["yellow", "pink", "blue", "green", "purple"];
 
@@ -65,6 +65,7 @@ function StickyNoteCard({
   zIndex,
   viewportWidth,
   viewportHeight,
+  boardRef,
   onFocus,
   onSaveContent,
   onToggleLocked,
@@ -77,6 +78,7 @@ function StickyNoteCard({
   zIndex: number;
   viewportWidth: number;
   viewportHeight: number;
+  boardRef: React.RefObject<HTMLDivElement>;
   onFocus: () => void;
   onSaveContent: (content: string) => void;
   onToggleLocked: () => void;
@@ -88,6 +90,10 @@ function StickyNoteCard({
   const [content, setContent] = useState(note.content);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  // True for the duration a drag gesture is trying to move the note into
+  // the Main Board's real DOM area — the note simply stops advancing (no
+  // state update, so no snap-back) and this drives the invalid indicator.
+  const [blockedByBoard, setBlockedByBoard] = useState(false);
   const [resizeSize, setResizeSize] = useState<{ width: number; height: number } | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -142,6 +148,7 @@ function StickyNoteCard({
     };
     e.currentTarget.setPointerCapture(e.pointerId);
     setDragPosition(persistedPosition);
+    setBlockedByBoard(false);
     // Keeps a fast drag gesture from selecting the note's own text.
     e.preventDefault();
   };
@@ -153,7 +160,26 @@ function StickyNoteCard({
     }
     const dx = e.clientX - drag.startClientX;
     const dy = e.clientY - drag.startClientY;
-    setDragPosition(clampPosition(drag.startNoteX + dx, drag.startNoteY + dy, viewportWidth, viewportHeight));
+    const candidate = clampPosition(drag.startNoteX + dx, drag.startNoteY + dy, viewportWidth, viewportHeight);
+
+    // Collision uses the Main Board's real, currently-rendered bounding
+    // rect and this note's actual current footprint — never hardcoded
+    // coordinates, so it stays correct as the board or the note resizes.
+    const boardRect = boardRef.current?.getBoundingClientRect();
+    if (
+      boardRect &&
+      rectsIntersect(
+        { x: candidate.x, y: candidate.y, width: size.width, height: renderHeight },
+        { x: boardRect.left, y: boardRect.top, width: boardRect.width, height: boardRect.height },
+      )
+    ) {
+      // Block immediately: never adopt the colliding candidate, so the
+      // note simply stops at the boundary — nothing to snap back from.
+      setBlockedByBoard(true);
+      return;
+    }
+    setBlockedByBoard(false);
+    setDragPosition(candidate);
   };
 
   const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -167,6 +193,7 @@ function StickyNoteCard({
     }
     const finalPosition = dragPosition;
     setDragPosition(null);
+    setBlockedByBoard(false);
     if (finalPosition && (finalPosition.x !== note.x || finalPosition.y !== note.y)) {
       onPositionCommit(finalPosition.x, finalPosition.y);
     }
@@ -242,10 +269,21 @@ function StickyNoteCard({
         height: renderHeight,
         zIndex,
       }}
-      className={`pointer-events-auto flex touch-none select-none flex-col gap-1.5 rounded-sm border p-2 shadow-sm ${
-        note.locked ? "cursor-default" : dragPosition ? "cursor-grabbing shadow-md" : "cursor-grab"
-      } ${COLOR_CLASSES[note.color]}`}
+      className={`pointer-events-auto relative flex touch-none select-none flex-col gap-1.5 rounded-sm border p-2 shadow-sm ${
+        blockedByBoard ? "border-red-500 ring-2 ring-red-500" : ""
+      } ${note.locked ? "cursor-default" : dragPosition ? "cursor-grabbing shadow-md" : "cursor-grab"} ${
+        COLOR_CLASSES[note.color]
+      }`}
     >
+      {blockedByBoard && (
+        <span
+          data-testid={`sticky-note-blocked-${note.id}`}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center text-2xl text-red-500"
+        >
+          ✕
+        </span>
+      )}
       <div className="flex items-center justify-between">
         {/*
           The single position/size lock control. Backed by the `locked`
@@ -317,7 +355,23 @@ function StickyNoteCard({
   );
 }
 
-export function StickyNotesView() {
+/**
+ * `active` controls only whether the small control panel (header, "+ 새
+ * 스티커" button, empty/loading state) is visible — it does NOT gate the
+ * hook or the floating canvas. This component is meant to stay mounted
+ * for the app's whole lifetime (see App.tsx), so switching to another
+ * tab/tool never unmounts it: the notes stay in memory, on screen, and
+ * a page reload is the only thing that ever re-fetches them from the
+ * server. `boardRef` is the Main Board panel's real DOM node, measured
+ * live (never hardcoded) to keep dragged notes out of it.
+ */
+export function StickyNotesView({
+  active,
+  boardRef,
+}: {
+  active: boolean;
+  boardRef: React.RefObject<HTMLDivElement>;
+}) {
   const {
     stickyNotes,
     loading,
@@ -355,6 +409,7 @@ export function StickyNotesView() {
                 zIndex={zIndexById[note.id] ?? 1}
                 viewportWidth={viewportWidth}
                 viewportHeight={viewportHeight}
+                boardRef={boardRef}
                 onFocus={() => bringToFront(note.id)}
                 onSaveContent={(content) => saveContent(note.id, content)}
                 onToggleLocked={() => toggleLocked(note.id, !note.locked)}
@@ -370,30 +425,32 @@ export function StickyNotesView() {
 
   return (
     <>
-      <div className="flex h-full flex-col gap-2 p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
-          <button
-            type="button"
-            onClick={() => create(viewportWidth, viewportHeight)}
-            className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
-          >
-            + 새 스티커
-          </button>
+      {active && (
+        <div className="flex h-full flex-col gap-2 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
+            <button
+              type="button"
+              onClick={() => create(viewportWidth, viewportHeight)}
+              className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
+            >
+              + 새 스티커
+            </button>
+          </div>
+          {error && (
+            <p role="alert" className="text-xs text-amber-600">
+              ⚠ {error}
+            </p>
+          )}
+          {loading ? (
+            <p className="text-xs text-neutral-400">불러오는 중…</p>
+          ) : stickyNotes.length === 0 ? (
+            <p className="text-xs text-neutral-400">아직 스티커 메모가 없습니다.</p>
+          ) : (
+            <p className="text-xs text-neutral-400">스티커 메모는 화면 주위에 자유롭게 배치할 수 있습니다.</p>
+          )}
         </div>
-        {error && (
-          <p role="alert" className="text-xs text-amber-600">
-            ⚠ {error}
-          </p>
-        )}
-        {loading ? (
-          <p className="text-xs text-neutral-400">불러오는 중…</p>
-        ) : stickyNotes.length === 0 ? (
-          <p className="text-xs text-neutral-400">아직 스티커 메모가 없습니다.</p>
-        ) : (
-          <p className="text-xs text-neutral-400">스티커 메모는 화면 주위에 자유롭게 배치할 수 있습니다.</p>
-        )}
-      </div>
+      )}
       {canvas}
     </>
   );
