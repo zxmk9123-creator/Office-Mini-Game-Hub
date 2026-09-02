@@ -12,6 +12,8 @@ import {
   SessionGameMismatchError,
   SessionNotEligibleError,
 } from "./services/gameResultService";
+import { InvalidNoteError, NoteNotFoundError } from "./services/noteService";
+import { InvalidStickyNoteError, StickyNoteNotFoundError } from "./services/stickyNoteService";
 
 /**
  * Translates domain errors raised by services into HTTP responses. Route
@@ -61,6 +63,22 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
   if (err instanceof InvalidGameResultError) {
     res.status(422).json({ error: "invalid_result", message: err.message });
+    return;
+  }
+  if (err instanceof NoteNotFoundError) {
+    res.status(404).json({ error: "note_not_found", message: err.message });
+    return;
+  }
+  if (err instanceof InvalidNoteError) {
+    res.status(400).json({ error: "invalid_note", message: err.message });
+    return;
+  }
+  if (err instanceof StickyNoteNotFoundError) {
+    res.status(404).json({ error: "sticky_note_not_found", message: err.message });
+    return;
+  }
+  if (err instanceof InvalidStickyNoteError) {
+    res.status(400).json({ error: "invalid_sticky_note", message: err.message });
     return;
   }
 

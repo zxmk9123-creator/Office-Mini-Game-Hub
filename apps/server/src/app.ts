@@ -9,10 +9,16 @@ import { GameSessionService } from "./services/gameSessionService";
 import { GameResultService } from "./services/gameResultService";
 import { RankingService } from "./services/rankingService";
 import { DrizzleRankingRepository } from "./repositories/rankingRepository";
+import { NoteService } from "./services/noteService";
+import { DrizzleNoteRepository } from "./repositories/noteRepository";
+import { StickyNoteService } from "./services/stickyNoteService";
+import { DrizzleStickyNoteRepository } from "./repositories/stickyNoteRepository";
 import { createPlayersRouter } from "./routes/players";
 import { createSessionsRouter } from "./routes/sessions";
 import { createResultsRouter } from "./routes/results";
 import { createRankingRouter } from "./routes/ranking";
+import { createNotesRouter } from "./routes/notes";
+import { createStickyNotesRouter } from "./routes/stickyNotes";
 import { errorHandler } from "./errorHandler";
 import { resolveCorsOrigins } from "./cors";
 
@@ -28,6 +34,8 @@ export function createApp(): Express {
   const resultService = new GameResultService(db, gameRegistry);
   const rankingRepository = new DrizzleRankingRepository(db);
   const rankingService = new RankingService(rankingRepository, gameRegistry);
+  const noteService = new NoteService(new DrizzleNoteRepository(db));
+  const stickyNoteService = new StickyNoteService(new DrizzleStickyNoteRepository(db));
 
   const app = express();
   app.use(cors({ origin: resolveCorsOrigins(process.env.CORS_ORIGIN) }));
@@ -40,6 +48,8 @@ export function createApp(): Express {
   app.use("/api", createSessionsRouter(sessionService));
   app.use("/api", createResultsRouter(resultService));
   app.use("/api", createRankingRouter(rankingService));
+  app.use("/api", createNotesRouter(noteService));
+  app.use("/api", createStickyNotesRouter(stickyNoteService));
 
   app.use(errorHandler);
 

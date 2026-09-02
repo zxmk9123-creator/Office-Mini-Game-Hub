@@ -1,11 +1,12 @@
-# Office Mini Game Hub
+# 메모장 (Office Mini Game Hub)
 
-업무 중 짧은 시간에 부담 없이 즐길 수 있는 초경량 미니게임 플랫폼. 닉네임 기반 플레이·기록·랭킹을 제공하고,
-새로운 게임을 독립적으로 추가할 수 있는 구조를 지향한다.
+가벼운 데스크톱형 메모 유틸리티. 메모와 스티커 메모가 애플리케이션의 기본 화면이고, 업무 중 짧게 즐길 수 있는
+미니게임(Reaction Test 등)은 "도구" 메뉴 아래에 딸린 부가 기능으로 제공된다. 저장소/기술 식별자
+(`mini-game-hub`, `reaction-test` 등)는 그대로 유지하고, 사용자에게 보이는 제품명만 "메모장"으로 표시한다.
 
 ## Status
 
-**Phase 8 — Nickname + Top 10 + Office Mini UI/UX** 완료. https://mini-game-hub-web.onrender.com 에 실제 배포되어 있다.
+**Phase 9 — Notebook + Sticky Notes Foundation** 완료. https://mini-game-hub-web.onrender.com 에 실제 배포되어 있다.
 
 - Phase 1: 모노레포 뼈대, 빌드 도구 체인, DB 스키마 초안
 - Phase 2: 프레임워크에 종속되지 않는 Game Core (Game 계약, 플랫폼 라이프사이클, GameRegistry, Mock Game)
@@ -18,6 +19,12 @@
 - Phase 8: 닉네임 입력 화면(`usePlayerSession` — 자동 Guest 생성 없이, 명시적 제출 시에만 Player 생성),
   Top 5 → Top 10 리더보드, 게임 선택(Home) 화면, HOME → NICKNAME → PLAYING → RESULT 상태 전환, 오피스 미니
   게임에 어울리는 절제된 UI/UX. 프론트엔드 테스트 24개 추가(vitest + @testing-library/react)
+- Phase 9: 제품 정체성을 "메모장"으로 재브랜딩(브라우저 타이틀/헤더/빈 상태 등 사용자 노출 영역만; 저장소·API·
+  게임 레지스트리 식별자는 그대로 유지) — 메모(`notes`)와 스티커 메모(`sticky_notes`) 기능을 라우트→서비스→
+  리포지토리→DB(마이그레이션 0004)의 기존 아키텍처로 신규 구현, PostgreSQL에 영속화되어 새로고침에도 유지됨.
+  상단 탭 내비게이션(메모 / 스티커 메모 / 도구)으로 구성된 노트북 셸이 기본 화면이 되었고, Reaction Test는
+  "도구" 아래의 부가 기능으로 이동(닉네임 입력은 Reaction Test 진입 시에만 요구). 작은 창 크기(≈600×500)까지
+  사용 가능한 반응형 레이아웃. 프론트엔드 테스트 17개, 백엔드 테스트 22개 추가
 
 인증, 안티치트는 아직 구현하지 않았다.
 
@@ -123,7 +130,22 @@ POST /api/games/:gameId/results   { sessionId, score, completion, metadata }
 GET  /api/games/:gameId/ranking   ?limit=20&offset=0&playerId=...
                                    -> 200 { game, entries, pagination, playerRank? } | 404 (game) | 409 (disabled game) | 400 (bad limit/offset)
 GET  /api/health                  -> 200 { status: "ok" }
+
+POST   /api/notes                 { title?, content? } -> 201 Note
+GET    /api/notes                 -> 200 Note[] (most recently updated first)
+GET    /api/notes/:id             -> 200 Note | 404
+PATCH  /api/notes/:id             { title?, content? } -> 200 Note | 404
+DELETE /api/notes/:id             -> 204 | 404
+
+POST   /api/sticky-notes          { content?, color? } -> 201 StickyNote
+GET    /api/sticky-notes          -> 200 StickyNote[] (pinned first, then most recently updated)
+PATCH  /api/sticky-notes/:id      { content?, color?, pinned? } -> 200 StickyNote | 404 | 400 (bad color)
+DELETE /api/sticky-notes/:id      -> 204 | 404
 ```
+
+Notes and sticky notes are not tied to a Player — they are process-wide 메모장 content, not per-game player
+data (Player/nickname remain scoped to the game/ranking pipeline). Sticky note `color` is restricted to a
+fixed palette (`yellow`, `pink`, `blue`, `green`, `purple`); any other value is a `400`.
 
 ## Ranking
 

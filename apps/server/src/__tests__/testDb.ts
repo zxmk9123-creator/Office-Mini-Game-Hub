@@ -10,8 +10,10 @@ export async function ensureGamesSynced(): Promise<void> {
   await syncGamesTable(getDb(), getGameRegistry());
 }
 
-/** Clears player/session/result rows between tests without touching `games` (registry-owned reference data). */
+/** Clears player/session/result/notes rows between tests without touching `games` (registry-owned reference data). */
 export async function resetTestData(): Promise<void> {
   const db = getDb();
-  await db.execute(sql`TRUNCATE TABLE game_results, game_sessions, players RESTART IDENTITY CASCADE`);
+  await db.execute(
+    sql`TRUNCATE TABLE game_results, game_sessions, players, notes, sticky_notes RESTART IDENTITY CASCADE`,
+  );
 }

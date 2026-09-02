@@ -26,6 +26,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
+  if (res.status === 204) {
+    if (!res.ok) {
+      throw new ApiError(res.status, undefined);
+    }
+    return undefined as T;
+  }
   const body = await res.json().catch(() => undefined);
   if (!res.ok) {
     throw new ApiError(res.status, body);
@@ -98,6 +104,60 @@ export interface RankingDto {
   entries: RankingEntryDto[];
   pagination: { limit: number; offset: number; total: number };
   playerRank?: RankingEntryDto | null;
+}
+
+export interface NoteDto {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listNotes(): Promise<NoteDto[]> {
+  return request<NoteDto[]>("/notes");
+}
+
+export function createNote(input: { title: string; content: string }): Promise<NoteDto> {
+  return request<NoteDto>("/notes", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateNote(id: string, input: { title?: string; content?: string }): Promise<NoteDto> {
+  return request<NoteDto>(`/notes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function deleteNote(id: string): Promise<void> {
+  return request<void>(`/notes/${id}`, { method: "DELETE" });
+}
+
+export type StickyNoteColor = "yellow" | "pink" | "blue" | "green" | "purple";
+
+export interface StickyNoteDto {
+  id: string;
+  content: string;
+  color: StickyNoteColor;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listStickyNotes(): Promise<StickyNoteDto[]> {
+  return request<StickyNoteDto[]>("/sticky-notes");
+}
+
+export function createStickyNote(input: { content?: string; color?: StickyNoteColor }): Promise<StickyNoteDto> {
+  return request<StickyNoteDto>("/sticky-notes", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateStickyNote(
+  id: string,
+  input: { content?: string; color?: StickyNoteColor; pinned?: boolean },
+): Promise<StickyNoteDto> {
+  return request<StickyNoteDto>(`/sticky-notes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function deleteStickyNote(id: string): Promise<void> {
+  return request<void>(`/sticky-notes/${id}`, { method: "DELETE" });
 }
 
 export function getRanking(

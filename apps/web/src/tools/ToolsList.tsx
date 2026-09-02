@@ -1,11 +1,11 @@
 /**
- * The game-selection screen. Reaction Test is the only entry today, but
- * this is a list a future game slots into — nothing here assumes there's
+ * The tool/game-selection screen. Reaction Test is the only entry today, but
+ * this is a list a future tool slots into — nothing here assumes there's
  * exactly one game.
  */
 const GAMES = [{ id: "reaction-test", name: "Reaction Test", description: "How fast are you?" }] as const;
 
-export function Home({
+export function ToolsList({
   nickname,
   onSelectGame,
   onSwitchPlayer,
@@ -15,18 +15,26 @@ export function Home({
   onSwitchPlayer: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 px-4 py-6">
+    <div className="flex flex-col gap-3 p-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-neutral-500">
-          Playing as <span className="font-medium text-neutral-800">{nickname}</span>
+          {nickname ? (
+            <>
+              현재 플레이어: <span className="font-medium text-neutral-800">{nickname}</span>
+            </>
+          ) : (
+            "게임을 시작하려면 닉네임이 필요합니다."
+          )}
         </p>
-        <button
-          type="button"
-          onClick={onSwitchPlayer}
-          className="text-xs text-neutral-400 underline-offset-2 hover:text-neutral-600 hover:underline"
-        >
-          Switch player
-        </button>
+        {nickname && (
+          <button
+            type="button"
+            onClick={onSwitchPlayer}
+            className="text-xs text-neutral-400 underline-offset-2 hover:text-neutral-600 hover:underline"
+          >
+            플레이어 전환
+          </button>
+        )}
       </div>
       <div className="flex flex-col gap-2">
         {GAMES.map((game) => (

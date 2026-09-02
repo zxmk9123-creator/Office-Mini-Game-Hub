@@ -49,6 +49,23 @@ export const gameSessions = pgTable(
   ],
 );
 
+export const notes = pgTable("notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull().default(""),
+  content: text("content").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const stickyNotes = pgTable("sticky_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  content: text("content").notNull().default(""),
+  color: text("color").notNull().default("yellow"),
+  pinned: boolean("pinned").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const gameResults = pgTable(
   "game_results",
   {
