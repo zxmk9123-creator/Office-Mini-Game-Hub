@@ -6,6 +6,7 @@ export interface StickyNoteRecord {
   content: string;
   color: string;
   pinned: boolean;
+  locked: boolean;
   x: number;
   y: number;
   width: number;
@@ -27,7 +28,16 @@ export interface StickyNoteRepository {
   findById(id: string): Promise<StickyNoteRecord | null>;
   update(
     id: string,
-    input: { content?: string; color?: string; pinned?: boolean; x?: number; y?: number; width?: number; height?: number },
+    input: {
+      content?: string;
+      color?: string;
+      pinned?: boolean;
+      locked?: boolean;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+    },
   ): Promise<StickyNoteRecord | null>;
   delete(id: string): Promise<boolean>;
 }
@@ -59,7 +69,16 @@ export class DrizzleStickyNoteRepository implements StickyNoteRepository {
 
   async update(
     id: string,
-    input: { content?: string; color?: string; pinned?: boolean; x?: number; y?: number; width?: number; height?: number },
+    input: {
+      content?: string;
+      color?: string;
+      pinned?: boolean;
+      locked?: boolean;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+    },
   ): Promise<StickyNoteRecord | null> {
     const [row] = await this.db
       .update(stickyNotes)

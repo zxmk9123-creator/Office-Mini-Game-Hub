@@ -13,6 +13,7 @@ export const updateStickyNoteRequestSchema = z.object({
   content: z.string().optional(),
   color: z.string().optional(),
   pinned: z.boolean().optional(),
+  locked: z.boolean().optional(),
   x: z.number().finite().optional(),
   y: z.number().finite().optional(),
   width: z.number().finite().positive().optional(),

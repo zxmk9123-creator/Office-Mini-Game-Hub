@@ -68,6 +68,7 @@ function StickyNoteCard({
   onFocus,
   onSaveContent,
   onTogglePinned,
+  onToggleLocked,
   onSetColor,
   onDelete,
   onPositionCommit,
@@ -80,6 +81,7 @@ function StickyNoteCard({
   onFocus: () => void;
   onSaveContent: (content: string) => void;
   onTogglePinned: () => void;
+  onToggleLocked: () => void;
   onSetColor: (color: StickyNoteColor) => void;
   onDelete: () => void;
   onPositionCommit: (x: number, y: number) => void;
@@ -126,6 +128,10 @@ function StickyNoteCard({
     if (target.closest("textarea, button, [data-resize-handle]")) {
       return;
     }
+    // Locked notes stay put — position/size lock, not a content-editing lock.
+    if (note.locked) {
+      return;
+    }
     onFocus();
     dragStateRef.current = {
       pointerId: e.pointerId,
@@ -170,6 +176,10 @@ function StickyNoteCard({
     // Isolated from drag: this never reaches the card's own onPointerDown.
     e.stopPropagation();
     e.preventDefault();
+    // Locked notes stay put — position/size lock, not a content-editing lock.
+    if (note.locked) {
+      return;
+    }
     onFocus();
     resizeStateRef.current = {
       pointerId: e.pointerId,
@@ -233,19 +243,31 @@ function StickyNoteCard({
         zIndex,
       }}
       className={`pointer-events-auto flex touch-none select-none flex-col gap-1.5 rounded-sm border p-2 shadow-sm ${
-        dragPosition ? "cursor-grabbing shadow-md" : "cursor-grab"
+        note.locked ? "cursor-default" : dragPosition ? "cursor-grabbing shadow-md" : "cursor-grab"
       } ${COLOR_CLASSES[note.color]}`}
     >
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onTogglePinned}
-          aria-pressed={note.pinned}
-          title={note.pinned ? "고정 해제" : "고정"}
-          className={`text-xs ${note.pinned ? "text-neutral-800" : "text-neutral-400"} hover:text-neutral-700`}
-        >
-          {note.pinned ? "📌 고정됨" : "📌 고정"}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onToggleLocked}
+            aria-pressed={note.locked}
+            aria-label={note.locked ? "잠금 해제" : "잠금"}
+            title={note.locked ? "잠금 해제 (이동/크기 조절 가능)" : "잠금 (이동/크기 조절 방지)"}
+            className={`text-xs ${note.locked ? "text-neutral-800" : "text-neutral-400"} hover:text-neutral-700`}
+          >
+            {note.locked ? "🔒" : "🔓"}
+          </button>
+          <button
+            type="button"
+            onClick={onTogglePinned}
+            aria-pressed={note.pinned}
+            title={note.pinned ? "고정 해제" : "고정"}
+            className={`text-xs ${note.pinned ? "text-neutral-800" : "text-neutral-400"} hover:text-neutral-700`}
+          >
+            {note.pinned ? "📌 고정됨" : "📌 고정"}
+          </button>
+        </div>
         <button
           type="button"
           onClick={onDelete}
@@ -305,6 +327,7 @@ export function StickyNotesView() {
     create,
     saveContent,
     togglePinned,
+    toggleLocked,
     setColor,
     updatePosition,
     updateSize,
@@ -338,6 +361,7 @@ export function StickyNotesView() {
                 onFocus={() => bringToFront(note.id)}
                 onSaveContent={(content) => saveContent(note.id, content)}
                 onTogglePinned={() => togglePinned(note.id, !note.pinned)}
+                onToggleLocked={() => toggleLocked(note.id, !note.locked)}
                 onSetColor={(color) => setColor(note.id, color)}
                 onDelete={() => remove(note.id)}
                 onPositionCommit={(x, y) => updatePosition(note.id, x, y)}

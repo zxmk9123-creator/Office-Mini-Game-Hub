@@ -14,6 +14,38 @@ describe("Sticky Notes API", () => {
     expect(res.body).toMatchObject({ content: "Pick up dry cleaning", color: "yellow", pinned: false });
   });
 
+  it("creates a sticky note with locked defaulting to false", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "new note" });
+    expect(res.status).toBe(201);
+    expect(res.body.locked).toBe(false);
+  });
+
+  it("toggles locked on and off via PATCH", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "lockable" });
+    const locked = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: true });
+    expect(locked.status).toBe(200);
+    expect(locked.body.locked).toBe(true);
+
+    const unlocked = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: false });
+    expect(unlocked.status).toBe(200);
+    expect(unlocked.body.locked).toBe(false);
+  });
+
+  it("persists locked across separate requests (survives a fresh app instance / reload)", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "lockable" });
+    await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: true });
+
+    const reloadedApp = createApp();
+    const list = await request(reloadedApp).get("/api/sticky-notes");
+    expect(list.body.find((n: { id: string }) => n.id === created.body.id)).toMatchObject({ locked: true });
+  });
+
+  it("leaves other fields untouched when only locked is updated", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "lockable", color: "blue" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ locked: true });
+    expect(res.body).toMatchObject({ content: "lockable", color: "blue", locked: true });
+  });
+
   it("creates a sticky note with a default canvas position when x/y are omitted", async () => {
     const res = await request(app).post("/api/sticky-notes").send({ content: "no position given" });
     expect(res.status).toBe(201);

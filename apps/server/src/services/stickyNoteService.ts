@@ -101,6 +101,7 @@ export class StickyNoteService {
       content?: string;
       color?: string;
       pinned?: boolean;
+      locked?: boolean;
       x?: number;
       y?: number;
       width?: number;
@@ -111,6 +112,7 @@ export class StickyNoteService {
       content?: string;
       color?: string;
       pinned?: boolean;
+      locked?: boolean;
       x?: number;
       y?: number;
       width?: number;
@@ -124,6 +126,9 @@ export class StickyNoteService {
     }
     if (input.pinned !== undefined) {
       patch.pinned = input.pinned;
+    }
+    if (input.locked !== undefined) {
+      patch.locked = input.locked;
     }
     if (input.x !== undefined) {
       patch.x = normalizeCoordinate(input.x, "x");

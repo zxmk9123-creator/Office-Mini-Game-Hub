@@ -20,6 +20,7 @@ const NOTE_A = {
   content: "buy milk",
   color: "yellow" as const,
   pinned: false,
+  locked: false,
   x: 100,
   y: 60,
   width: 200,
@@ -410,6 +411,133 @@ describe("StickyNotesView", () => {
       firePointer(handle, "pointermove", { clientX: -5000, clientY: -5000 });
 
       expect(Number.parseFloat(noteEl.style.height)).toBeGreaterThanOrEqual(564);
+    });
+  });
+
+  describe("lock", () => {
+    it("a new sticky note defaults to locked = false", async () => {
+      mockedListStickyNotes.mockResolvedValue([]);
+      mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, content: "" });
+
+      render(<StickyNotesView />);
+      await screen.findByText(/아직 스티커 메모가 없습니다/);
+      fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
+
+      await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalled());
+      // The create payload never sends `locked` — the DB column default (false) governs new notes.
+      expect(mockedCreateStickyNote.mock.calls[0][0]).not.toHaveProperty("locked");
+      expect(await screen.findByRole("button", { name: "잠금" })).toBeTruthy();
+    });
+
+    it("renders a lock button", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      expect(await screen.findByRole("button", { name: "잠금" })).toBeTruthy();
+    });
+
+    it("clicking the lock button changes locked false -> true", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: true });
+
+      render(<StickyNotesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "잠금" }));
+
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { locked: true }));
+    });
+
+    it("clicking the lock button again changes locked true -> false", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: false });
+
+      render(<StickyNotesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "잠금 해제" }));
+
+      await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { locked: false }));
+    });
+
+    it("persists the locked state through the API (survives a fresh mount)", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
+      render(<StickyNotesView />);
+
+      expect(await screen.findByRole("button", { name: "잠금 해제" })).toBeTruthy();
+      expect(mockedListStickyNotes).toHaveBeenCalledTimes(1);
+    });
+
+    it("a locked note cannot start dragging", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+
+      firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
+      firePointer(noteEl, "pointermove", { clientX: 140, clientY: 90 });
+
+      expect(noteEl.style.left).toBe("100px");
+      expect(noteEl.style.top).toBe("60px");
+    });
+
+    it("a locked note cannot start resizing", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+
+      expect(noteEl.style.width).toBe("200px");
+      expect(noteEl.style.height).toBe("160px");
+    });
+
+    it("a locked note can still have its content edited", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: true }]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, locked: true, content: "still editable" });
+
+      render(<StickyNotesView />);
+      const textarea = await screen.findByLabelText("스티커 메모 내용");
+      fireEvent.change(textarea, { target: { value: "still editable" } });
+      fireEvent.blur(textarea);
+
+      await waitFor(() =>
+        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { content: "still editable" }),
+      );
+    });
+
+    it("unlocking restores existing drag behavior", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: false }]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+
+      firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
+      firePointer(noteEl, "pointermove", { clientX: 140, clientY: 90 });
+
+      expect(noteEl.style.left).toBe("140px");
+      expect(noteEl.style.top).toBe("90px");
+    });
+
+    it("unlocking restores existing resize behavior", async () => {
+      mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, locked: false }]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+
+      expect(noteEl.style.width).toBe("240px");
+      expect(noteEl.style.height).toBe("200px");
+    });
+
+    it("the lock button does not start a drag when clicked", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const lockButton = await screen.findByRole("button", { name: "잠금" });
+
+      firePointer(lockButton, "pointerdown", { clientX: 100, clientY: 60 });
+      firePointer(noteEl, "pointermove", { clientX: 200, clientY: 200 });
+
+      expect(noteEl.style.left).toBe("100px");
+      expect(noteEl.style.top).toBe("60px");
     });
   });
 });

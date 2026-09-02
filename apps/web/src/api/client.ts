@@ -137,6 +137,7 @@ export interface StickyNoteDto {
   content: string;
   color: StickyNoteColor;
   pinned: boolean;
+  locked: boolean;
   x: number;
   y: number;
   width: number;
@@ -166,6 +167,7 @@ export function updateStickyNote(
     content?: string;
     color?: StickyNoteColor;
     pinned?: boolean;
+    locked?: boolean;
     x?: number;
     y?: number;
     width?: number;

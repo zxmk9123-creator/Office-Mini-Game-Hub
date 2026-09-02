@@ -62,6 +62,10 @@ export const stickyNotes = pgTable("sticky_notes", {
   content: text("content").notNull().default(""),
   color: text("color").notNull().default("yellow"),
   pinned: boolean("pinned").notNull().default(false),
+  // Position/size lock — when true, dragging and resizing are disabled
+  // client-side; content editing and pin/color/delete stay available.
+  // Distinct from `pinned` (which only affects list ordering).
+  locked: boolean("locked").notNull().default(false),
   // Freeform canvas position, in canvas/viewport pixels. Defaulted so
   // existing rows (added before the canvas layout existed) get a safe,
   // on-screen position via this same column default.

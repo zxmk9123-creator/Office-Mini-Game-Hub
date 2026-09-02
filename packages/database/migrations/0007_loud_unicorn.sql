@@ -1,0 +1,1 @@
+ALTER TABLE "sticky_notes" ADD COLUMN "locked" boolean DEFAULT false NOT NULL;

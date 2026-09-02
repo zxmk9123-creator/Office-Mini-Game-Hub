@@ -16,6 +16,7 @@ export interface StickyNotesState {
   create: (viewportWidth: number, viewportHeight: number) => Promise<void>;
   saveContent: (id: string, content: string) => Promise<void>;
   togglePinned: (id: string, pinned: boolean) => Promise<void>;
+  toggleLocked: (id: string, locked: boolean) => Promise<void>;
   setColor: (id: string, color: StickyNoteColor) => Promise<void>;
   updatePosition: (id: string, x: number, y: number) => Promise<void>;
   updateSize: (id: string, width: number, height: number) => Promise<void>;
@@ -81,6 +82,7 @@ export function useStickyNotes(): StickyNotesState {
 
   const saveContent = useCallback((id: string, content: string) => applyUpdate(id, { content }), [applyUpdate]);
   const togglePinned = useCallback((id: string, pinned: boolean) => applyUpdate(id, { pinned }), [applyUpdate]);
+  const toggleLocked = useCallback((id: string, locked: boolean) => applyUpdate(id, { locked }), [applyUpdate]);
   const setColor = useCallback((id: string, color: StickyNoteColor) => applyUpdate(id, { color }), [applyUpdate]);
   const updatePosition = useCallback((id: string, x: number, y: number) => applyUpdate(id, { x, y }), [applyUpdate]);
   const updateSize = useCallback(
@@ -105,6 +107,7 @@ export function useStickyNotes(): StickyNotesState {
     create,
     saveContent,
     togglePinned,
+    toggleLocked,
     setColor,
     updatePosition,
     updateSize,
