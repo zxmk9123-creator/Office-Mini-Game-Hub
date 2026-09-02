@@ -58,6 +58,24 @@ export function clampSize(
   return { width: clampedWidth, height: clampedHeight };
 }
 
+/**
+ * Fixed vertical chrome around the content textarea — padding, the gaps
+ * between rows, and the header (pin/delete) and footer (color/resize)
+ * rows — that isn't part of the content itself. Calibrated to
+ * StickyNoteCard's current markup (p-2 + gap-1.5 x2 + header/footer row
+ * heights); update this if that markup's spacing changes.
+ */
+export const STICKY_NOTE_CHROME_HEIGHT = 64;
+
+/**
+ * The note's rendered height: never shorter than the persisted/base
+ * height (the user's manual size preference), but expanded past it when
+ * the content itself needs more room than that to stay fully visible.
+ */
+export function contentAwareHeight(persistedHeight: number, textareaContentHeight: number): number {
+  return Math.max(persistedHeight, textareaContentHeight + STICKY_NOTE_CHROME_HEIGHT);
+}
+
 /** A simple deterministic cascade: note #0 at the default position, each next one nudged diagonally, wrapping. */
 export function cascadePosition(
   index: number,

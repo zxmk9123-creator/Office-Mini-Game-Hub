@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStickyNotes } from "./useStickyNotes";
 import type { StickyNoteColor, StickyNoteDto } from "../api/client";
-import { clampPosition, clampSize } from "./stickyNoteLayout";
+import { clampPosition, clampSize, contentAwareHeight } from "./stickyNoteLayout";
 
 const COLORS: StickyNoteColor[] = ["yellow", "pink", "blue", "green", "purple"];
 
@@ -90,10 +90,33 @@ function StickyNoteCard({
   const dragStateRef = useRef<DragState | null>(null);
   const [resizeSize, setResizeSize] = useState<{ width: number; height: number } | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [textareaContentHeight, setTextareaContentHeight] = useState(0);
 
   const persistedPosition = clampPosition(note.x, note.y, viewportWidth, viewportHeight);
   const position = dragPosition ?? persistedPosition;
   const size = resizeSize ?? { width: note.width, height: note.height };
+  // Auto-expand past the persisted/dragged height when the content itself
+  // needs more room, without ever overwriting that persisted height — a
+  // purely visual overlay recomputed from the textarea's own natural
+  // content size (never from an API response, never sent to the server).
+  const renderHeight = contentAwareHeight(size.height, textareaContentHeight);
+
+  // Measures how tall the textarea's content actually needs to be, using
+  // the standard auto-grow-textarea trick (shrink to `auto` to get a true
+  // scrollHeight reading, then restore) — re-run only when content or
+  // width changes, never from a ResizeObserver, so there's no feedback
+  // loop and no risk of it firing on every render.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) {
+      return;
+    }
+    const previousHeight = el.style.height;
+    el.style.height = "auto";
+    setTextareaContentHeight(el.scrollHeight);
+    el.style.height = previousHeight;
+  }, [content, size.width]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Interactive controls (buttons), the editable textarea, and the resize
@@ -206,7 +229,7 @@ function StickyNoteCard({
         left: position.x,
         top: position.y,
         width: size.width,
-        height: size.height,
+        height: renderHeight,
         zIndex,
       }}
       className={`pointer-events-auto flex touch-none select-none flex-col gap-1.5 rounded-sm border p-2 shadow-sm ${
@@ -233,6 +256,7 @@ function StickyNoteCard({
         </button>
       </div>
       <textarea
+        ref={textareaRef}
         value={content}
         onChange={(e) => setContent(e.target.value)}
         onBlur={() => {
