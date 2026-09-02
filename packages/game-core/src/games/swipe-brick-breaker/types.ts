@@ -46,8 +46,8 @@ export function rowToY(row: number): number {
 }
 
 export const BALL_RADIUS = 0.12;
-export const BASE_BALL_SPEED = 6; // logical units / second
-export const MAX_BALL_SPEED = 10;
+export const BASE_BALL_SPEED = 12; // logical units / second (2x the original 6)
+export const MAX_BALL_SPEED = 20; // 2x the original 10
 
 /** Never spawn more than this many new bricks in a single turn. Red bonus balls are separate from this cap. */
 export const MAX_NEW_BRICKS_PER_TURN = 5;

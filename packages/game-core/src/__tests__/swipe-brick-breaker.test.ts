@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BALL_SPREAD_RADIANS,
+  BASE_BALL_SPEED,
   BOARD_COLS,
   BOARD_ROWS,
   FORMATION_TOP_ROW,
+  MAX_BALL_SPEED,
   MAX_NEW_BRICKS_PER_TURN,
   SwipeBrickBreakerGame,
   SwipeBrickBreakerInputError,
@@ -73,13 +75,13 @@ describe("generateBricks", () => {
     expect(a).toEqual(b);
   });
 
-  it("brick HP is low at level 1 and increases gradually with level", () => {
+  it("brick HP increases by exactly +1 per round, independent of ball count/red-ball collection", () => {
     expect(brickHpForLevel(1)).toBe(1);
-    expect(brickHpForLevel(2)).toBe(1);
-    expect(brickHpForLevel(3)).toBe(1);
-    expect(brickHpForLevel(4)).toBe(2);
-    expect(brickHpForLevel(4)).toBeGreaterThanOrEqual(brickHpForLevel(1));
-    expect(brickHpForLevel(30)).toBeGreaterThan(brickHpForLevel(3));
+    expect(brickHpForLevel(2)).toBe(2);
+    expect(brickHpForLevel(3)).toBe(3);
+    for (let level = 1; level < 30; level++) {
+      expect(brickHpForLevel(level + 1) - brickHpForLevel(level)).toBe(1);
+    }
   });
 });
 
@@ -210,11 +212,38 @@ describe("stepBalls (collision physics)", () => {
     expect(redBonusBalls).toHaveLength(0);
   });
 
-  it("a ball bounces off a red bonus ball just like a brick, and never collides with both in one tick", () => {
-    const brick: Brick = { row: 2, col: 3, hp: 3, maxHp: 3 };
-    const redBall = { row: 2, col: 3 }; // same cell — only one collision should resolve
-    const { hits, collected } = stepBalls([ball({ x: 3.5, y: 2.45, vx: 0, vy: 1 })], [brick], [redBall], 0.1);
-    expect(hits.length + collected.length).toBe(1);
+  it("a red bonus ball never bounces a ball: velocity is completely unchanged by collecting it", () => {
+    const redBall = { row: 2, col: 3 };
+    const incoming = ball({ x: 3.5, y: 2.45, vx: 0.3, vy: 1 });
+    const { balls, collected } = stepBalls([incoming], [], [redBall], 0.1);
+    expect(collected).toEqual([redBall]);
+    // Straight-line motion only: same velocity, position advanced by
+    // exactly vx*dt / vy*dt, exactly as an ordinary non-collision frame.
+    expect(balls[0].vx).toBe(incoming.vx);
+    expect(balls[0].vy).toBe(incoming.vy);
+    expect(balls[0].x).toBeCloseTo(incoming.x + incoming.vx * 0.1, 10);
+    expect(balls[0].y).toBeCloseTo(incoming.y + incoming.vy * 0.1, 10);
+  });
+
+  it("collecting a red bonus ball does not consume/block that tick's one-brick-collision slot", () => {
+    // A brick elsewhere in the same tick's path still resolves normally —
+    // collection is independent of, not competing with, brick collisions.
+    const brick: Brick = { row: 5, col: 3, hp: 3, maxHp: 3 };
+    const redBall = { row: 2, col: 3 };
+    const { collected } = stepBalls([ball({ x: 3.5, y: 2.45, vx: 0, vy: 1 })], [brick], [redBall], 0.1);
+    expect(collected).toEqual([redBall]);
+  });
+
+  it("red bonus balls never trigger the minimum-vertical-velocity safety net (not treated as a real collision)", () => {
+    // A ball on an already near-horizontal heading (below the safety net's
+    // floor) passing through a red bonus ball with no wall/brick collision
+    // this tick must keep that exact heading — only an actual bounce may
+    // invoke the safety net.
+    const redBall = { row: 2, col: 3 };
+    const incoming = ball({ x: 3.5, y: 2.45, vx: 5, vy: 0.01 });
+    const { balls } = stepBalls([incoming], [], [redBall], 0.001);
+    expect(balls[0].vx).toBe(incoming.vx);
+    expect(balls[0].vy).toBe(incoming.vy);
   });
 });
 
@@ -622,6 +651,27 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
     const expectedVx = Math.sin(0.3);
     expect(state.balls[0].vx / -state.balls[0].vy).toBeCloseTo(Math.tan(0.3), 5);
     expect(Math.sign(state.balls[0].vx)).toBe(Math.sign(expectedVx) || 0);
+  });
+
+  it("launch speed at round 1 is BASE_BALL_SPEED (the doubled 12 units/sec), plus the existing tiny per-level growth", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+    expect(BASE_BALL_SPEED).toBe(12);
+    // speedForLevel(1) = BASE_BALL_SPEED + 1 * 0.03 (unchanged growth rule, doubled base).
+    expect(Math.hypot(state.balls[0].vx, state.balls[0].vy)).toBeCloseTo(BASE_BALL_SPEED + 0.03, 10);
+  });
+
+  it("launch speed grows with round but never exceeds the doubled MAX_BALL_SPEED (20 units/sec)", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, level: 500, ballCount: 1 };
+    state = game.handleInput(state, { type: "aim", angleRad: 0.1 });
+    state = game.handleInput(state, { type: "fire" });
+    expect(MAX_BALL_SPEED).toBe(20);
+    const speed = Math.hypot(state.balls[0].vx, state.balls[0].vy);
+    expect(speed).toBeCloseTo(MAX_BALL_SPEED, 10);
   });
 
   it("aim consistency: the aim direction is exactly the first ball's initial (normalized) direction vector", () => {

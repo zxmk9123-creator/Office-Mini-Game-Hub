@@ -91,13 +91,14 @@ function applyCollision(ball: Ball, collision: CellCollision): Ball {
 }
 
 /**
- * Advances all active balls by `dtSeconds`, resolving wall, brick, and
- * red-bonus-ball collisions. A ball resolves at most one collision (brick
- * OR red bonus ball) per call — no double damage/collection within a
- * single frame — and is deactivated ("returned") once it fully passes
- * below the board — the arcade equivalent of falling back into the
- * player's hand. Pure and deterministic: same inputs always produce the
- * same outputs.
+ * Advances all active balls by `dtSeconds`, resolving wall and brick
+ * collisions (bounces) and red-bonus-ball collection (pass-through, no
+ * bounce). A ball resolves at most one brick collision per call — no
+ * double damage within a single frame — independently of collecting any
+ * number of red bonus balls it happens to pass through the same frame,
+ * and is deactivated ("returned") once it fully passes below the board —
+ * the arcade equivalent of falling back into the player's hand. Pure and
+ * deterministic: same inputs always produce the same outputs.
  */
 export function stepBalls(
   balls: Ball[],
@@ -151,8 +152,9 @@ export function stepBalls(
       return { ...ball, active: false };
     }
 
-    // At most one cell collision (brick OR red bonus ball, never both)
-    // per ball per tick.
+    // At most one brick collision (bounce) per ball per tick. Red bonus
+    // balls are handled separately below and are never part of this —
+    // they're pass-through collectibles, not a collision surface.
     let collidedWithCell = false;
     for (const brick of remainingBricks) {
       if (brick.hp <= 0) {
@@ -171,18 +173,17 @@ export function stepBalls(
       break;
     }
 
-    if (!collidedWithCell) {
-      for (const redBall of remainingRedBalls) {
-        const collision = circleVsCell(ball, redBall.row, redBall.col);
-        if (!collision) {
-          continue;
-        }
-        ball = applyCollision(ball, collision);
-        remainingRedBalls = remainingRedBalls.filter((r) => r !== redBall);
-        collected.push(redBall);
-        collidedWithCell = true;
-        break;
+    // Red bonus balls are collectibles only — touching one collects it
+    // but never bounces or otherwise changes the ball's velocity/position,
+    // and never counts as a collision for the min-vertical-velocity net
+    // below. The ball passes straight through as if it weren't there.
+    for (const redBall of remainingRedBalls) {
+      const collision = circleVsCell(ball, redBall.row, redBall.col);
+      if (!collision) {
+        continue;
       }
+      remainingRedBalls = remainingRedBalls.filter((r) => r !== redBall);
+      collected.push(redBall);
     }
 
     collidedThisTick = collidedThisTick || collidedWithCell;

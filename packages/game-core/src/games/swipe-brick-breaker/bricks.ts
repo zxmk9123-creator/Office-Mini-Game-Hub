@@ -9,13 +9,12 @@ import {
 } from "./types";
 
 /**
- * How tough a freshly-spawned brick at this level is. Deliberately simple
- * and monotonic — level 1-2 bricks are always 1 HP (so the very first
- * volley teaches the mechanic instantly), then gradually toughens up.
- * `brickHP ≈ 1 + floor(level / 3)`, per the design brief.
+ * How tough a freshly-spawned brick at this round is. Exactly +1 HP per
+ * round, independent of ball count or red-ball collection: round 1 -> HP
+ * 1, round 2 -> HP 2, round 3 -> HP 3, and so on with no cap.
  */
 export function brickHpForLevel(level: number): number {
-  return 1 + Math.floor(Math.max(0, level - 1) / 3);
+  return Math.max(1, level);
 }
 
 /**
