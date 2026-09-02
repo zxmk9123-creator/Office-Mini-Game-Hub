@@ -101,6 +101,7 @@ export class SwipeBrickBreakerGame
       redBonusBalls: [],
       balls: [],
       aimAngleRad: 0,
+      pendingBallGain: 0,
     };
   }
 
@@ -119,6 +120,7 @@ export class SwipeBrickBreakerGame
       redBonusBalls: formation.redBonusBalls,
       balls: [],
       aimAngleRad: 0,
+      pendingBallGain: 0,
     };
   }
 
@@ -191,17 +193,27 @@ export class SwipeBrickBreakerGame
         this.bricksDestroyed += 1;
       }
     }
+    let ballGainDelta = 0;
     for (const _collectedBall of collected) {
       scoreDelta += 30 + state.level * 2;
       this.redBonusBallsCollected += 1;
+      ballGainDelta += 1;
     }
 
+    const pendingBallGain = state.pendingBallGain + ballGainDelta;
     const volleyOver = balls.every((b) => !b.active);
     if (!volleyOver) {
-      return { ...state, balls, bricks, redBonusBalls, score: state.score + scoreDelta };
+      return { ...state, balls, bricks, redBonusBalls, score: state.score + scoreDelta, pendingBallGain };
     }
 
-    return this.resolveTurn({ ...state, balls: [], bricks, redBonusBalls, score: state.score + scoreDelta });
+    return this.resolveTurn({
+      ...state,
+      balls: [],
+      bricks,
+      redBonusBalls,
+      score: state.score + scoreDelta,
+      pendingBallGain,
+    });
   }
 
   /**
@@ -228,6 +240,7 @@ export class SwipeBrickBreakerGame
         bricks: shiftedBricks,
         redBonusBalls: shiftedRedBonusBalls,
         aimAngleRad: 0,
+        pendingBallGain: 0,
       };
     }
 
@@ -237,10 +250,15 @@ export class SwipeBrickBreakerGame
       ...state,
       phase: "ready",
       level: nextLevel,
-      ballCount: nextLevel,
+      // Round and ball count are independent: ballCount only grows by a
+      // red bonus ball collected during the volley just completed — never
+      // by round/level progression itself — and the gain only becomes
+      // available now, for the NEXT volley, never mid-volley.
+      ballCount: state.ballCount + state.pendingBallGain,
       bricks: [...shiftedBricks, ...formation.bricks],
       redBonusBalls: [...shiftedRedBonusBalls, ...formation.redBonusBalls],
       aimAngleRad: 0,
+      pendingBallGain: 0,
     };
   }
 

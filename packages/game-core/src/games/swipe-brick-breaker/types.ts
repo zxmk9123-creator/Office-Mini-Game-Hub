@@ -112,6 +112,14 @@ export interface SwipeBrickBreakerState {
   balls: Ball[];
   /** Radians from straight up, clamped to +/-MAX_AIM_RADIANS. Only meaningful while phase === "aiming". */
   aimAngleRad: number;
+  /**
+   * Red bonus balls collected so far during the volley currently in
+   * flight. Ball count only ever grows from a collection, but the new
+   * ball must not become available mid-volley — this accumulates across
+   * ticks and is applied to ballCount (then reset to 0) once the volley
+   * fully resolves, so the gain always lands on the NEXT volley.
+   */
+  pendingBallGain: number;
 }
 
 export type SwipeBrickBreakerInput =

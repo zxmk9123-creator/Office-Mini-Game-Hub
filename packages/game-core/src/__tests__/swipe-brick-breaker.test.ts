@@ -304,9 +304,11 @@ describe("SwipeBrickBreakerGame — level/ball progression", () => {
     expect(state.ballCount).toBe(1);
   });
 
-  it("advances level by exactly 1 and ball count by exactly 1 after a cleared volley", () => {
+  it("advances level by exactly 1 after a cleared volley, but never changes ball count on its own", () => {
     const game = newGame();
     let state = game.start(game.createInitialState());
+    // No red bonus balls this turn — nothing to collect either way.
+    state = { ...state, redBonusBalls: [] };
     state = game.handleInput(state, { type: "aim", angleRad: 0 });
     state = game.handleInput(state, { type: "fire" });
     // Drive the volley to completion — balls launch upward and eventually
@@ -317,7 +319,7 @@ describe("SwipeBrickBreakerGame — level/ball progression", () => {
     expect(state.phase).not.toBe("volley");
     if (state.phase === "ready") {
       expect(state.level).toBe(2);
-      expect(state.ballCount).toBe(2);
+      expect(state.ballCount).toBe(1);
     }
   });
 
@@ -338,9 +340,6 @@ describe("SwipeBrickBreakerGame — level/ball progression", () => {
       expect(state.phase).not.toBe("volley"); // the volley must have actually resolved
       turns += 1;
     }
-    // Whether it ended via game over or the loop cap, level tracks 1:1
-    // with ballCount and neither was clamped to any fixed maximum.
-    expect(state.ballCount).toBe(state.level > 0 ? state.level : state.ballCount);
     expect(state.level).toBeGreaterThan(1);
   });
 });
@@ -348,10 +347,10 @@ describe("SwipeBrickBreakerGame — level/ball progression", () => {
 // "Round" is displayed in the UI (SwipeBrickBreakerView) and IS the
 // `level` field underneath — round = number of completed volleys + 1.
 // These tests pin down that exact semantics: it is a pure turn counter,
-// never derived from brick count, brick HP, ball count, or score (even
-// though ballCount happens to equal it by the separate, explicit
-// "+1 ball per level" rule — that's a coincidence of two independent
-// rules sharing a value, not round being *defined* as ball count).
+// never derived from brick count, brick HP, ball count, or score. Round
+// and ball count (`ballCount`) are fully independent state — round always
+// advances by 1 per completed volley, while ballCount only ever grows
+// from a collected red bonus ball.
 describe("SwipeBrickBreakerGame — round progression (round = completedVolleys + 1)", () => {
   function newGame() {
     return new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.5, 0.1, 0.9, 0.3, 0.6, 0.2]));
@@ -478,6 +477,109 @@ describe("SwipeBrickBreakerGame — round progression (round = completedVolleys 
       expect(moved?.row).toBe(3); // exactly +1
       expect(state.bricks.every((b) => b.row !== 0)).toBe(true);
     }
+  });
+});
+
+describe("SwipeBrickBreakerGame — ball count (grows only from a collected red bonus ball)", () => {
+  function newGame() {
+    return new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.5, 0.1, 0.9, 0.3, 0.6, 0.2]));
+  }
+
+  function completeOneVolley(game: SwipeBrickBreakerGame, state: ReturnType<SwipeBrickBreakerGame["start"]>) {
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+    for (let i = 0; i < 20000 && state.phase === "volley"; i++) {
+      state = game.handleInput(state, { type: "tick", dtMs: 16 });
+    }
+    return state;
+  }
+
+  it("a new game starts at round 1 with exactly 1 ball", () => {
+    const game = newGame();
+    const state = game.start(game.createInitialState());
+    expect(state.level).toBe(1);
+    expect(state.ballCount).toBe(1);
+  });
+
+  it("completing several volleys with no red bonus balls advances round but never ball count", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    for (let turn = 0; turn < 5; turn++) {
+      state = { ...state, bricks: [], redBonusBalls: [] };
+      state = completeOneVolley(game, state);
+      expect(state.phase).toBe("ready");
+      expect(state.ballCount).toBe(1);
+    }
+    expect(state.level).toBe(6);
+  });
+
+  it("collecting a red bonus ball increases ballCount by exactly 1, but only once the volley resolves — not mid-volley", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    // Place a red bonus ball directly in the path of a straight-up shot.
+    state = { ...state, bricks: [], redBonusBalls: [{ row: 3, col: 3 }] };
+    const ballCountBefore = state.ballCount;
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+
+    let collectedDuringVolley = false;
+    for (let i = 0; i < 20000 && state.phase === "volley"; i++) {
+      state = game.handleInput(state, { type: "tick", dtMs: 16 });
+      // The gain must never be visible while the volley is still in flight
+      // (i.e. any tick that leaves phase at "volley"). Only the final tick,
+      // the one that resolves the turn, is allowed to apply it.
+      if (state.phase === "volley") {
+        expect(state.ballCount).toBe(ballCountBefore);
+      }
+      if (state.redBonusBalls.length === 0) collectedDuringVolley = true;
+    }
+
+    expect(collectedDuringVolley).toBe(true); // sanity: the collectible really was hit
+    expect(state.phase).not.toBe("volley");
+    if (state.phase === "ready") {
+      expect(state.ballCount).toBe(ballCountBefore + 1);
+    }
+  });
+
+  it("a missed red bonus ball (crosses the bottom) disappears without increasing ballCount or ending the game", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    // Aim straight up on a column with no bricks or bonus ball anywhere
+    // near it, and put the bonus ball at the very bottom row so the next
+    // one-row shift pushes it past the boundary and it is dropped.
+    state = { ...state, bricks: [], redBonusBalls: [{ row: 6, col: 6 }] };
+    const ballCountBefore = state.ballCount;
+    state = completeOneVolley(game, state);
+    expect(state.phase).toBe("ready"); // never game over from a missed red ball
+    // The original bonus ball crossed row >= BOARD_ROWS on the one-row
+    // shift and was dropped — a newly-spawned bonus ball this turn could
+    // coincidentally land back at row 6/col 6 later, so identify the
+    // original by row alone right after the shift is not reliable; what
+    // actually matters for this invariant is simply that ballCount never
+    // moved from a ball that was lost rather than collected.
+    expect(state.ballCount).toBe(ballCountBefore);
+  });
+
+  it("round and ball count are fully independent: round always advances by 1, ball count only via collection", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    // Turn 1: a bonus ball present but nowhere near the shot's column — round advances, ball count does not.
+    state = { ...state, bricks: [], redBonusBalls: [{ row: 3, col: 0 }] };
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+    for (let i = 0; i < 20000 && state.phase === "volley"; i++) {
+      state = game.handleInput(state, { type: "tick", dtMs: 16 });
+    }
+    expect(state.phase).toBe("ready");
+    expect(state.level).toBe(2);
+    expect(state.ballCount).toBe(1);
+
+    // Turn 2: a bonus ball directly in the shot's path — round advances AND ball count grows by 1.
+    state = { ...state, bricks: [], redBonusBalls: [{ row: 3, col: 3 }] };
+    state = completeOneVolley(game, state);
+    expect(state.phase).toBe("ready");
+    expect(state.level).toBe(3);
+    expect(state.ballCount).toBe(2);
   });
 });
 
