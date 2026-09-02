@@ -3,7 +3,10 @@
  * this is a list a future tool slots into — nothing here assumes there's
  * exactly one game.
  */
-const GAMES = [{ id: "reaction-test", name: "Reaction Test", description: "How fast are you?" }] as const;
+const GAMES = [
+  { id: "reaction-test", name: "Reaction Test", description: "How fast are you?" },
+  { id: "swipe-brick-breaker", name: "Swipe Brick Breaker", description: "Drag to aim, release to fire." },
+] as const;
 
 export function ToolsList({
   nickname,

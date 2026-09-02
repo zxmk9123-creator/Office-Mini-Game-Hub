@@ -68,6 +68,15 @@ describe("App navigation", () => {
     expect(await screen.findByText("Reaction Test")).toBeTruthy();
   });
 
+  it("navigates to 도구 and shows Swipe Brick Breaker as an available tool, gated behind a nickname", async () => {
+    render(<App />);
+    await screen.findAllByText("사명을 입력하시오.");
+    fireEvent.click(screen.getByRole("button", { name: "도구" }));
+    fireEvent.click(await screen.findByText("Swipe Brick Breaker"));
+
+    expect(await screen.findByPlaceholderText("Your nickname")).toBeTruthy();
+  });
+
   it("does not prompt for a nickname on the default 메모 view, only once Reaction Test or Sticky Notes is entered", async () => {
     render(<App />);
     await screen.findAllByText("사명을 입력하시오.");

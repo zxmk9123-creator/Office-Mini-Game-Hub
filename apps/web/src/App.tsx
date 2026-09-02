@@ -6,9 +6,10 @@ import { ToolsList } from "./tools/ToolsList";
 import { NicknameEntry } from "./player/NicknameEntry";
 import { usePlayerSession } from "./player/usePlayerSession";
 import { ReactionTestView } from "./games/reaction-test/ReactionTestView";
+import { SwipeBrickBreakerView } from "./games/swipe-brick-breaker/SwipeBrickBreakerView";
 
 type Section = "notes" | "sticky-notes" | "tools";
-type ToolScreen = "list" | "reaction-test";
+type ToolScreen = "list" | "reaction-test" | "swipe-brick-breaker";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "notes", label: "메모" },
@@ -48,24 +49,30 @@ export default function App() {
   if (section === "notes") {
     body = memoUnlocked ? <NotesView /> : <MemoGate onUnlock={() => setMemoUnlocked(true)} />;
   } else if (section === "tools") {
-    if (toolScreen === "reaction-test") {
-      if (!session.playerId || !session.nickname) {
-        body = <NicknameEntry session={session} />;
-      } else {
-        body = (
-          <ReactionTestView
-            playerId={session.playerId}
-            nickname={session.nickname}
-            onHome={() => setToolScreen("list")}
-          />
-        );
-      }
-    } else {
+    if (toolScreen === "list") {
       body = (
         <ToolsList
           nickname={session.nickname}
-          onSelectGame={() => setToolScreen("reaction-test")}
+          onSelectGame={(gameId) => setToolScreen(gameId as ToolScreen)}
           onSwitchPlayer={() => session.clearPlayer()}
+        />
+      );
+    } else if (!session.playerId || !session.nickname) {
+      body = <NicknameEntry session={session} />;
+    } else if (toolScreen === "reaction-test") {
+      body = (
+        <ReactionTestView
+          playerId={session.playerId}
+          nickname={session.nickname}
+          onHome={() => setToolScreen("list")}
+        />
+      );
+    } else {
+      body = (
+        <SwipeBrickBreakerView
+          playerId={session.playerId}
+          nickname={session.nickname}
+          onHome={() => setToolScreen("list")}
         />
       );
     }

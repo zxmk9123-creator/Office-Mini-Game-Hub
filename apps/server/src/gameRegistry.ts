@@ -1,4 +1,4 @@
-import { GameRegistry, ReactionTestGame, type Clock } from "@mini-game-hub/game-core";
+import { GameRegistry, ReactionTestGame, SwipeBrickBreakerGame, type Clock } from "@mini-game-hub/game-core";
 
 /**
  * The server only ever reads a registered game's metadata (id, scoreType,
@@ -24,6 +24,7 @@ export function getGameRegistry(): GameRegistry {
   if (!registry) {
     registry = new GameRegistry();
     registry.register(new ReactionTestGame(new SystemClock()));
+    registry.register(new SwipeBrickBreakerGame(new SystemClock()));
   }
   return registry;
 }
