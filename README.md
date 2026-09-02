@@ -5,7 +5,7 @@
 
 ## Status
 
-**Phase 7 — Ranking System** 완료. https://mini-game-hub-web.onrender.com 에 실제 배포되어 있다.
+**Phase 8 — Nickname + Top 10 + Office Mini UI/UX** 완료. https://mini-game-hub-web.onrender.com 에 실제 배포되어 있다.
 
 - Phase 1: 모노레포 뼈대, 빌드 도구 체인, DB 스키마 초안
 - Phase 2: 프레임워크에 종속되지 않는 Game Core (Game 계약, 플랫폼 라이프사이클, GameRegistry, Mock Game)
@@ -15,6 +15,9 @@
 - Phase 6: Render 배포 — `render.yaml`, 관리형 Postgres용 SSL 처리, `0.0.0.0` 바인딩, graceful shutdown,
   부팅 시 자동 마이그레이션, 환경변수 기반 CORS/`VITE_API_BASE_URL`
 - Phase 7: 게임 공통 랭킹 시스템 — `RankingService`, best-score/동점 처리, 페이지네이션, 리더보드 UI
+- Phase 8: 닉네임 입력 화면(`usePlayerSession` — 자동 Guest 생성 없이, 명시적 제출 시에만 Player 생성),
+  Top 5 → Top 10 리더보드, 게임 선택(Home) 화면, HOME → NICKNAME → PLAYING → RESULT 상태 전환, 오피스 미니
+  게임에 어울리는 절제된 UI/UX. 프론트엔드 테스트 24개 추가(vitest + @testing-library/react)
 
 인증, 안티치트는 아직 구현하지 않았다.
 
