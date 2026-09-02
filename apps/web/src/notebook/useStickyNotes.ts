@@ -7,15 +7,17 @@ import {
   type StickyNoteColor,
   type StickyNoteDto,
 } from "../api/client";
+import { cascadePosition } from "./stickyNoteLayout";
 
 export interface StickyNotesState {
   stickyNotes: StickyNoteDto[];
   loading: boolean;
   error: string | null;
-  create: () => Promise<void>;
+  create: (viewportWidth: number, viewportHeight: number) => Promise<void>;
   saveContent: (id: string, content: string) => Promise<void>;
   togglePinned: (id: string, pinned: boolean) => Promise<void>;
   setColor: (id: string, color: StickyNoteColor) => Promise<void>;
+  updatePosition: (id: string, x: number, y: number) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -45,15 +47,19 @@ export function useStickyNotes(): StickyNotesState {
     refresh();
   }, [refresh]);
 
-  const create = useCallback(async () => {
-    setError(null);
-    try {
-      const stickyNote = await createStickyNote({ content: "" });
-      setStickyNotes((prev) => [stickyNote, ...prev]);
-    } catch {
-      setError("스티커 메모를 만들지 못했습니다.");
-    }
-  }, []);
+  const create = useCallback(
+    async (viewportWidth: number, viewportHeight: number) => {
+      setError(null);
+      try {
+        const { x, y } = cascadePosition(stickyNotes.length, viewportWidth, viewportHeight);
+        const stickyNote = await createStickyNote({ content: "", x, y });
+        setStickyNotes((prev) => [stickyNote, ...prev]);
+      } catch {
+        setError("스티커 메모를 만들지 못했습니다.");
+      }
+    },
+    [stickyNotes.length],
+  );
 
   const applyUpdate = useCallback(async (id: string, patch: Parameters<typeof updateStickyNote>[1]) => {
     setError(null);
@@ -75,6 +81,7 @@ export function useStickyNotes(): StickyNotesState {
   const saveContent = useCallback((id: string, content: string) => applyUpdate(id, { content }), [applyUpdate]);
   const togglePinned = useCallback((id: string, pinned: boolean) => applyUpdate(id, { pinned }), [applyUpdate]);
   const setColor = useCallback((id: string, color: StickyNoteColor) => applyUpdate(id, { color }), [applyUpdate]);
+  const updatePosition = useCallback((id: string, x: number, y: number) => applyUpdate(id, { x, y }), [applyUpdate]);
 
   const remove = useCallback(async (id: string) => {
     setError(null);
@@ -86,5 +93,5 @@ export function useStickyNotes(): StickyNotesState {
     }
   }, []);
 
-  return { stickyNotes, loading, error, create, saveContent, togglePinned, setColor, remove };
+  return { stickyNotes, loading, error, create, saveContent, togglePinned, setColor, updatePosition, remove };
 }

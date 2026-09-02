@@ -25,6 +25,13 @@
   상단 탭 내비게이션(메모 / 스티커 메모 / 도구)으로 구성된 노트북 셸이 기본 화면이 되었고, Reaction Test는
   "도구" 아래의 부가 기능으로 이동(닉네임 입력은 Reaction Test 진입 시에만 요구). 작은 창 크기(≈600×500)까지
   사용 가능한 반응형 레이아웃. 프론트엔드 테스트 17개, 백엔드 테스트 22개 추가
+- Phase 9 후속: 스티커 메모를 카드/그리드 목록에서 자유 배치 캔버스로 전환. `sticky_notes`에 `x`/`y` 좌표
+  컬럼 추가(마이그레이션 0005, 기존 행은 안전한 기본값으로 백필), Pointer Events 기반 드래그(포인터 캡처 사용,
+  텍스트/버튼 위에서는 드래그가 시작되지 않음), 드래그 중에는 API 호출 없이 로컬 상태만 갱신하고 포인터를 뗄 때
+  최종 좌표만 저장. 스티커는 항상 뷰포트 안에 최소한 일부가 보이도록 클램프되며, 겹침은 허용하지만 충돌
+  회피는 구현하지 않음. 포커스/드래그된 스티커는 클라이언트 로컬 z-순서로 맨 앞에 표시(영속화하지 않음).
+  새 스티커는 대각선 캐스케이드 오프셋으로 배치되어 겹치지 않음. 중앙 노트북 패널은 그대로 유지되고 스티커는
+  `document.body`에 포털로 렌더링되어 패널 주위를 자유롭게 떠다님
 
 인증, 안티치트는 아직 구현하지 않았다.
 
@@ -137,15 +144,17 @@ GET    /api/notes/:id             -> 200 Note | 404
 PATCH  /api/notes/:id             { title?, content? } -> 200 Note | 404
 DELETE /api/notes/:id             -> 204 | 404
 
-POST   /api/sticky-notes          { content?, color? } -> 201 StickyNote
+POST   /api/sticky-notes          { content?, color?, x?, y? } -> 201 StickyNote
 GET    /api/sticky-notes          -> 200 StickyNote[] (pinned first, then most recently updated)
-PATCH  /api/sticky-notes/:id      { content?, color?, pinned? } -> 200 StickyNote | 404 | 400 (bad color)
+PATCH  /api/sticky-notes/:id      { content?, color?, pinned?, x?, y? } -> 200 StickyNote | 404 | 400 (bad color/x/y)
 DELETE /api/sticky-notes/:id      -> 204 | 404
 ```
 
 Notes and sticky notes are not tied to a Player — they are process-wide 메모장 content, not per-game player
 data (Player/nickname remain scoped to the game/ranking pipeline). Sticky note `color` is restricted to a
-fixed palette (`yellow`, `pink`, `blue`, `green`, `purple`); any other value is a `400`.
+fixed palette (`yellow`, `pink`, `blue`, `green`, `purple`); any other value is a `400`. `x`/`y` are the sticky
+note's freeform canvas position in pixels; both must be finite numbers (rejects `NaN`/`Infinity`) or the
+request is a `400`. Position updates are sent once, when a drag ends — never on every pointer-move.
 
 ## Ranking
 

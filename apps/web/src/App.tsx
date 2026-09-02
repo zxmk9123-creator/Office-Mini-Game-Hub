@@ -56,7 +56,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-100 p-2">
-      <div className="flex h-[560px] max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="relative z-10 flex h-[560px] max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
         <header className="flex items-center border-b border-neutral-200 px-3 py-2">
           <h1 className="text-sm font-semibold text-neutral-800">메모장</h1>
         </header>

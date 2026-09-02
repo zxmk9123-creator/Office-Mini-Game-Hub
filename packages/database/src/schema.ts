@@ -62,6 +62,11 @@ export const stickyNotes = pgTable("sticky_notes", {
   content: text("content").notNull().default(""),
   color: text("color").notNull().default("yellow"),
   pinned: boolean("pinned").notNull().default(false),
+  // Freeform canvas position, in canvas/viewport pixels. Defaulted so
+  // existing rows (added before the canvas layout existed) get a safe,
+  // on-screen position via this same column default.
+  x: doublePrecision("x").notNull().default(24),
+  y: doublePrecision("y").notNull().default(24),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

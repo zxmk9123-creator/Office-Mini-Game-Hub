@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStickyNotes } from "./useStickyNotes";
 import type { StickyNoteColor, StickyNoteDto } from "../api/client";
+import { clampPosition, STICKY_NOTE_WIDTH } from "./stickyNoteLayout";
 
 const COLORS: StickyNoteColor[] = ["yellow", "pink", "blue", "green", "purple"];
 
@@ -28,23 +30,117 @@ const COLOR_LABELS: Record<StickyNoteColor, string> = {
   purple: "보라",
 };
 
+/** Re-renders on window resize so the canvas can re-clamp note positions into the shrunk viewport. */
+function useViewportSize() {
+  const [size, setSize] = useState(() => ({
+    width: typeof window === "undefined" ? 1024 : window.innerWidth,
+    height: typeof window === "undefined" ? 768 : window.innerHeight,
+  }));
+  useEffect(() => {
+    const onResize = () => setSize({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return size;
+}
+
+interface DragState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startNoteX: number;
+  startNoteY: number;
+}
+
 function StickyNoteCard({
   note,
+  zIndex,
+  viewportWidth,
+  viewportHeight,
+  onFocus,
   onSaveContent,
   onTogglePinned,
   onSetColor,
   onDelete,
+  onPositionCommit,
 }: {
   note: StickyNoteDto;
+  zIndex: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  onFocus: () => void;
   onSaveContent: (content: string) => void;
   onTogglePinned: () => void;
   onSetColor: (color: StickyNoteColor) => void;
   onDelete: () => void;
+  onPositionCommit: (x: number, y: number) => void;
 }) {
   const [content, setContent] = useState(note.content);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+
+  const persistedPosition = clampPosition(note.x, note.y, viewportWidth, viewportHeight);
+  const position = dragPosition ?? persistedPosition;
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Interactive controls (buttons) and the editable textarea drive their
+    // own behavior — starting a drag from them would fight typing/clicking.
+    const target = e.target as HTMLElement;
+    if (target.closest("textarea, button")) {
+      return;
+    }
+    onFocus();
+    dragStateRef.current = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startNoteX: note.x,
+      startNoteY: note.y,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragPosition(persistedPosition);
+    // Keeps a fast drag gesture from selecting the note's own text.
+    e.preventDefault();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) {
+      return;
+    }
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    setDragPosition(clampPosition(drag.startNoteX + dx, drag.startNoteY + dy, viewportWidth, viewportHeight));
+  };
+
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) {
+      return;
+    }
+    dragStateRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    const finalPosition = dragPosition;
+    setDragPosition(null);
+    if (finalPosition && (finalPosition.x !== note.x || finalPosition.y !== note.y)) {
+      onPositionCommit(finalPosition.x, finalPosition.y);
+    }
+  };
 
   return (
-    <div className={`flex flex-col gap-2 rounded-md border p-2 ${COLOR_CLASSES[note.color]}`}>
+    <div
+      data-testid={`sticky-note-${note.id}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      style={{ position: "absolute", left: position.x, top: position.y, width: STICKY_NOTE_WIDTH, zIndex }}
+      className={`pointer-events-auto flex touch-none select-none flex-col gap-1.5 rounded-sm border p-2 shadow-sm ${
+        dragPosition ? "cursor-grabbing shadow-md" : "cursor-grab"
+      } ${COLOR_CLASSES[note.color]}`}
+    >
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -72,7 +168,7 @@ function StickyNoteCard({
         }}
         placeholder="내용을 입력하세요…"
         aria-label="스티커 메모 내용"
-        className="min-h-[80px] resize-none bg-transparent text-sm text-neutral-800 outline-none"
+        className="min-h-[80px] cursor-text resize-none bg-transparent text-sm text-neutral-800 outline-none"
       />
       <div className="flex gap-1">
         {COLORS.map((color) => (
@@ -93,43 +189,72 @@ function StickyNoteCard({
 }
 
 export function StickyNotesView() {
-  const { stickyNotes, loading, error, create, saveContent, togglePinned, setColor, remove } = useStickyNotes();
+  const { stickyNotes, loading, error, create, saveContent, togglePinned, setColor, updatePosition, remove } =
+    useStickyNotes();
+  const { width: viewportWidth, height: viewportHeight } = useViewportSize();
+
+  // A lightweight client-side stacking order: the most recently
+  // focused/dragged note gets the highest z-index. Not persisted — there's
+  // no requirement for z-order to survive a reload, only for the note the
+  // user is actively working with to visually sit on top right now.
+  const zCounter = useRef(1);
+  const [zIndexById, setZIndexById] = useState<Record<string, number>>({});
+  const bringToFront = useCallback((id: string) => {
+    zCounter.current += 1;
+    setZIndexById((prev) => ({ ...prev, [id]: zCounter.current }));
+  }, []);
+
+  const canvas =
+    typeof document === "undefined"
+      ? null
+      : createPortal(
+          <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+            {stickyNotes.map((note) => (
+              <StickyNoteCard
+                key={note.id}
+                note={note}
+                zIndex={zIndexById[note.id] ?? 1}
+                viewportWidth={viewportWidth}
+                viewportHeight={viewportHeight}
+                onFocus={() => bringToFront(note.id)}
+                onSaveContent={(content) => saveContent(note.id, content)}
+                onTogglePinned={() => togglePinned(note.id, !note.pinned)}
+                onSetColor={(color) => setColor(note.id, color)}
+                onDelete={() => remove(note.id)}
+                onPositionCommit={(x, y) => updatePosition(note.id, x, y)}
+              />
+            ))}
+          </div>,
+          document.body,
+        );
 
   return (
-    <div className="flex h-full flex-col gap-2 p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
-        <button
-          type="button"
-          onClick={create}
-          className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
-        >
-          + 새 스티커
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="text-xs text-amber-600">
-          ⚠ {error}
-        </p>
-      )}
-      {loading ? (
-        <p className="text-xs text-neutral-400">불러오는 중…</p>
-      ) : stickyNotes.length === 0 ? (
-        <p className="text-xs text-neutral-400">아직 스티커 메모가 없습니다.</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
-          {stickyNotes.map((note) => (
-            <StickyNoteCard
-              key={note.id}
-              note={note}
-              onSaveContent={(content) => saveContent(note.id, content)}
-              onTogglePinned={() => togglePinned(note.id, !note.pinned)}
-              onSetColor={(color) => setColor(note.id, color)}
-              onDelete={() => remove(note.id)}
-            />
-          ))}
+    <>
+      <div className="flex h-full flex-col gap-2 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-neutral-500">스티커 메모</span>
+          <button
+            type="button"
+            onClick={() => create(viewportWidth, viewportHeight)}
+            className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-50"
+          >
+            + 새 스티커
+          </button>
         </div>
-      )}
-    </div>
+        {error && (
+          <p role="alert" className="text-xs text-amber-600">
+            ⚠ {error}
+          </p>
+        )}
+        {loading ? (
+          <p className="text-xs text-neutral-400">불러오는 중…</p>
+        ) : stickyNotes.length === 0 ? (
+          <p className="text-xs text-neutral-400">아직 스티커 메모가 없습니다.</p>
+        ) : (
+          <p className="text-xs text-neutral-400">스티커 메모는 화면 주위에 자유롭게 배치할 수 있습니다.</p>
+        )}
+      </div>
+      {canvas}
+    </>
   );
 }

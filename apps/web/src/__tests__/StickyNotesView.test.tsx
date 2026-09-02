@@ -20,15 +20,33 @@ const NOTE_A = {
   content: "buy milk",
   color: "yellow" as const,
   pinned: false,
+  x: 100,
+  y: 60,
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
+
+function firePointer(
+  el: Element,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  props: { clientX: number; clientY: number; pointerId?: number },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true }) as PointerEvent;
+  Object.assign(event, { pointerId: props.pointerId ?? 1, clientX: props.clientX, clientY: props.clientY });
+  fireEvent(el, event);
+}
 
 beforeEach(() => {
   mockedListStickyNotes.mockReset();
   mockedCreateStickyNote.mockReset();
   mockedUpdateStickyNote.mockReset();
   mockedDeleteStickyNote.mockReset();
+  // jsdom elements don't implement pointer capture — stub it so drag handlers can call it safely.
+  Object.assign(HTMLElement.prototype, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn().mockReturnValue(true),
+  });
 });
 
 describe("StickyNotesView", () => {
@@ -38,7 +56,7 @@ describe("StickyNotesView", () => {
     expect(await screen.findByText(/아직 스티커 메모가 없습니다/)).toBeTruthy();
   });
 
-  it("creates a sticky note when '+ 새 스티커' is clicked", async () => {
+  it("creates a sticky note with a valid initial position when '+ 새 스티커' is clicked", async () => {
     mockedListStickyNotes.mockResolvedValue([]);
     mockedCreateStickyNote.mockResolvedValue({ ...NOTE_A, content: "" });
 
@@ -46,7 +64,22 @@ describe("StickyNotesView", () => {
     await screen.findByText(/아직 스티커 메모가 없습니다/);
     fireEvent.click(screen.getByRole("button", { name: "+ 새 스티커" }));
 
-    await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalledWith({ content: "" }));
+    await waitFor(() => expect(mockedCreateStickyNote).toHaveBeenCalled());
+    const call = mockedCreateStickyNote.mock.calls[0][0];
+    expect(call.content).toBe("");
+    expect(Number.isFinite(call.x)).toBe(true);
+    expect(Number.isFinite(call.y)).toBe(true);
+    expect(call.x).toBeGreaterThanOrEqual(0);
+    expect(call.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it("renders a note at its persisted coordinates", async () => {
+    mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+    render(<StickyNotesView />);
+
+    const noteEl = await screen.findByTestId("sticky-note-s1");
+    expect(noteEl.style.left).toBe("100px");
+    expect(noteEl.style.top).toBe("60px");
   });
 
   it("saves edited content on blur", async () => {
@@ -91,6 +124,17 @@ describe("StickyNotesView", () => {
     await waitFor(() => expect(mockedDeleteStickyNote).toHaveBeenCalledWith("s1"));
   });
 
+  it("returns 404 when editing or deleting a missing sticky note", async () => {
+    // (frontend-side smoke check that a rejected update surfaces the error state, not a crash)
+    mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+    mockedUpdateStickyNote.mockRejectedValue(new Error("not found"));
+
+    render(<StickyNotesView />);
+    fireEvent.click(await screen.findByRole("button", { name: "📌 고정" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+
   it("persists across a fresh mount (fetches from the server, not local memory)", async () => {
     mockedListStickyNotes.mockResolvedValue([NOTE_A]);
     const { unmount } = render(<StickyNotesView />);
@@ -101,5 +145,71 @@ describe("StickyNotesView", () => {
     render(<StickyNotesView />);
     expect(await screen.findByDisplayValue("buy milk")).toBeTruthy();
     expect(mockedListStickyNotes).toHaveBeenCalledTimes(2);
+  });
+
+  it("dragging the note body updates its on-screen position", async () => {
+    mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+    render(<StickyNotesView />);
+    const noteEl = await screen.findByTestId("sticky-note-s1");
+
+    firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
+    firePointer(noteEl, "pointermove", { clientX: 140, clientY: 90 });
+
+    expect(noteEl.style.left).toBe("140px");
+    expect(noteEl.style.top).toBe("90px");
+  });
+
+  it("persists the final position only on pointer up, not on every pointer move", async () => {
+    mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+    mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, x: 140, y: 90 });
+    render(<StickyNotesView />);
+    const noteEl = await screen.findByTestId("sticky-note-s1");
+
+    firePointer(noteEl, "pointerdown", { clientX: 100, clientY: 60 });
+    firePointer(noteEl, "pointermove", { clientX: 120, clientY: 75 });
+    firePointer(noteEl, "pointermove", { clientX: 140, clientY: 90 });
+    expect(mockedUpdateStickyNote).not.toHaveBeenCalled();
+
+    firePointer(noteEl, "pointerup", { clientX: 140, clientY: 90 });
+    await waitFor(() => expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { x: 140, y: 90 }));
+    expect(mockedUpdateStickyNote).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a drag when the pointer goes down on the delete button", async () => {
+    mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+    render(<StickyNotesView />);
+    const deleteButton = await screen.findByRole("button", { name: "스티커 메모 삭제" });
+    const noteEl = await screen.findByTestId("sticky-note-s1");
+
+    firePointer(deleteButton, "pointerdown", { clientX: 100, clientY: 60 });
+    firePointer(noteEl, "pointermove", { clientX: 200, clientY: 200 });
+
+    expect(noteEl.style.left).toBe("100px");
+    expect(noteEl.style.top).toBe("60px");
+  });
+
+  it("does not start a drag when the pointer goes down on the textarea", async () => {
+    mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+    render(<StickyNotesView />);
+    const textarea = await screen.findByLabelText("스티커 메모 내용");
+    const noteEl = await screen.findByTestId("sticky-note-s1");
+
+    firePointer(textarea, "pointerdown", { clientX: 100, clientY: 60 });
+    firePointer(noteEl, "pointermove", { clientX: 200, clientY: 200 });
+
+    expect(noteEl.style.left).toBe("100px");
+    expect(noteEl.style.top).toBe("60px");
+  });
+
+  it("clamps a note's rendered position within the viewport", async () => {
+    mockedListStickyNotes.mockResolvedValue([{ ...NOTE_A, x: 999999, y: -999999 }]);
+    render(<StickyNotesView />);
+    const noteEl = await screen.findByTestId("sticky-note-s1");
+
+    const left = Number.parseFloat(noteEl.style.left);
+    const top = Number.parseFloat(noteEl.style.top);
+    expect(left).toBeLessThanOrEqual(window.innerWidth);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(top).toBeGreaterThanOrEqual(0);
   });
 });

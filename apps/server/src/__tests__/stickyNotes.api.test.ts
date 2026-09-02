@@ -14,6 +14,43 @@ describe("Sticky Notes API", () => {
     expect(res.body).toMatchObject({ content: "Pick up dry cleaning", color: "yellow", pinned: false });
   });
 
+  it("creates a sticky note with a default canvas position when x/y are omitted", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "no position given" });
+    expect(res.status).toBe(201);
+    expect(typeof res.body.x).toBe("number");
+    expect(typeof res.body.y).toBe("number");
+    expect(Number.isFinite(res.body.x)).toBe(true);
+    expect(Number.isFinite(res.body.y)).toBe(true);
+  });
+
+  it("creates a sticky note at an explicit x/y position and persists it", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "placed", x: 120, y: 340 });
+    expect(res.status).toBe(201);
+    expect(res.body.x).toBe(120);
+    expect(res.body.y).toBe(340);
+  });
+
+  it("rejects non-finite x/y on create", async () => {
+    const nan = await request(app).post("/api/sticky-notes").send({ content: "x", x: "not-a-number", y: 0 });
+    expect(nan.status).toBe(400);
+    const infinite = await request(app).post("/api/sticky-notes").send({ content: "x", x: Infinity, y: 0 });
+    expect(infinite.status).toBe(400);
+  });
+
+  it("updates x/y and returns the new position", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "movable", x: 0, y: 0 });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ x: 250, y: 175 });
+    expect(res.status).toBe(200);
+    expect(res.body.x).toBe(250);
+    expect(res.body.y).toBe(175);
+  });
+
+  it("rejects non-finite x/y on update", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "movable" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ x: Number.NaN });
+    expect(res.status).toBe(400);
+  });
+
   it("creates a sticky note with an explicit color", async () => {
     const res = await request(app).post("/api/sticky-notes").send({ content: "Call back", color: "blue" });
     expect(res.status).toBe(201);
