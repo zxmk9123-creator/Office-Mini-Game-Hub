@@ -217,6 +217,80 @@ describe("stepBalls (collision physics)", () => {
   });
 });
 
+describe("stepBalls — strictly linear trajectory between collisions", () => {
+  function ball(overrides: Partial<Ball> = {}): Ball {
+    return { x: 3.5, y: 3.5, vx: 0, vy: -1, radius: 0.12, active: true, ...overrides };
+  }
+
+  it("stays on the exact mathematical line P(t) = P + Vt across many frames with no collision", () => {
+    const P = { x: 3.5, y: 4.5 };
+    const V = { vx: 0.7, vy: -2.1 };
+    let balls = [ball({ x: P.x, y: P.y, vx: V.vx, vy: V.vy })];
+    const dt = 1 / 60;
+    let elapsed = 0;
+
+    for (let frame = 0; frame < 20; frame++) {
+      const { balls: nextBalls } = stepBalls(balls, [], [], dt);
+      balls = nextBalls;
+      elapsed += dt;
+      // No walls/bricks in range for this many frames at this speed, so
+      // velocity must be bit-identical to the launch vector every frame.
+      expect(balls[0].vx).toBe(V.vx);
+      expect(balls[0].vy).toBe(V.vy);
+      // Position must match the closed-form line equation exactly
+      // (within floating-point tolerance from repeated dt accumulation).
+      expect(balls[0].x).toBeCloseTo(P.x + V.vx * elapsed, 10);
+      expect(balls[0].y).toBeCloseTo(P.y + V.vy * elapsed, 10);
+    }
+  });
+
+  it("velocity is untouched on every straight-line (non-collision) frame — only position changes", () => {
+    let balls = [ball({ x: 3.5, y: 4.5, vx: 0.3, vy: -1.5 })];
+    for (let frame = 0; frame < 10; frame++) {
+      const before = { vx: balls[0].vx, vy: balls[0].vy };
+      const { balls: nextBalls } = stepBalls(balls, [], [], 1 / 60);
+      balls = nextBalls;
+      expect(balls[0].vx).toBe(before.vx);
+      expect(balls[0].vy).toBe(before.vy);
+    }
+  });
+
+  it("left/right wall reflection: vx sign flips, vy is unaffected", () => {
+    const { balls: leftBounce } = stepBalls([ball({ x: 0.05, vx: -3, vy: -1.7 })], [], [], 1);
+    expect(leftBounce[0].vx).toBe(3);
+    expect(leftBounce[0].vy).toBe(-1.7);
+
+    const { balls: rightBounce } = stepBalls([ball({ x: 6.95, vx: 3, vy: -1.7 })], [], [], 1);
+    expect(rightBounce[0].vx).toBe(-3);
+    expect(rightBounce[0].vy).toBe(-1.7);
+  });
+
+  it("top wall reflection: vy sign flips, vx is unaffected", () => {
+    const { balls } = stepBalls([ball({ y: 0.05, vx: 2.4, vy: -3 })], [], [], 1);
+    expect(balls[0].vy).toBe(3);
+    expect(balls[0].vx).toBe(2.4);
+  });
+
+  it("does not apply the minimum-vertical-velocity safety net on a non-collision frame (only alongside a real collision)", () => {
+    // A near-horizontal velocity that would trip the safety net if it
+    // ran unconditionally — but with no wall/brick/red-ball in range,
+    // nothing should collide, so velocity must pass through unchanged.
+    const vx = 6;
+    const vy = -0.1;
+    const { balls } = stepBalls([ball({ x: 3.5, y: 5, vx, vy })], [], [], 1 / 60);
+    expect(balls[0].vx).toBe(vx);
+    expect(balls[0].vy).toBe(vy);
+  });
+
+  it("deterministic: identical inputs (position, velocity, board state) always produce identical output", () => {
+    const bricks: Brick[] = [{ row: 2, col: 3, hp: 5, maxHp: 5 }];
+    const a = stepBalls([ball({ x: 3.4, y: 2.4, vx: 0.5, vy: 1.2 })], bricks, [], 1 / 60);
+    const b = stepBalls([ball({ x: 3.4, y: 2.4, vx: 0.5, vy: 1.2 })], bricks, [], 1 / 60);
+    expect(a.balls).toEqual(b.balls);
+    expect(a.hits).toEqual(b.hits);
+  });
+});
+
 describe("SwipeBrickBreakerGame — level/ball progression", () => {
   function newGame() {
     return new SwipeBrickBreakerGame(new FixedClock(), new SequenceRandomSource([0.5, 0.1, 0.9, 0.3]));
@@ -309,6 +383,52 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
     const expectedVx = Math.sin(0.3);
     expect(state.balls[0].vx / -state.balls[0].vy).toBeCloseTo(Math.tan(0.3), 5);
     expect(Math.sign(state.balls[0].vx)).toBe(Math.sign(expectedVx) || 0);
+  });
+
+  it("aim consistency: the aim direction is exactly the first ball's initial (normalized) direction vector", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "aim", angleRad: -0.42 });
+    const aimAngle = state.aimAngleRad;
+    state = game.handleInput(state, { type: "fire" });
+
+    // The aim-guide direction (per the view's rendering: sin/-cos of the
+    // aimed angle) and the first ball's normalized velocity direction
+    // must be the exact same vector — not merely close, not a
+    // downstream approximation.
+    const guideDir = { x: Math.sin(aimAngle), y: -Math.cos(aimAngle) };
+    const speed = Math.hypot(state.balls[0].vx, state.balls[0].vy);
+    const ballDir = { x: state.balls[0].vx / speed, y: state.balls[0].vy / speed };
+    expect(ballDir.x).toBeCloseTo(guideDir.x, 10);
+    expect(ballDir.y).toBeCloseTo(guideDir.y, 10);
+  });
+
+  it("multiple balls: each receives its own fixed direction exactly once at launch, and holds it every frame until a collision", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, ballCount: 5, level: 5 };
+    state = game.handleInput(state, { type: "aim", angleRad: 0.2 });
+    state = game.handleInput(state, { type: "fire" });
+
+    expect(state.balls).toHaveLength(5);
+    // Not every ball shares the same direction (a controlled spread, not
+    // all-identical) — but each individual ball's own direction is fixed.
+    const launchDirections = state.balls.map((b) => ({ vx: b.vx, vy: b.vy }));
+    const allSame = launchDirections.every((d) => d.vx === launchDirections[0].vx);
+    expect(allSame).toBe(false);
+
+    // Advance several frames with nothing to collide with — every ball
+    // must still carry the exact same vx/vy it launched with (no
+    // per-frame random re-steering of any ball).
+    for (let frame = 0; frame < 15; frame++) {
+      state = game.handleInput(state, { type: "tick", dtMs: 4 });
+      state.balls.forEach((b, i) => {
+        if (b.active) {
+          expect(b.vx).toBe(launchDirections[i].vx);
+          expect(b.vy).toBe(launchDirections[i].vy);
+        }
+      });
+    }
   });
 });
 

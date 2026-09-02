@@ -115,21 +115,34 @@ export function stepBalls(
       return original;
     }
 
+    // Straight-line motion: `velocity` (vx, vy) is untouched by this
+    // integration step — only position moves, along the exact line
+    // implied by the ball's current, already-launched velocity vector.
+    // Nothing below this point ever recomputes velocity from anything
+    // other than an actual collision.
     let ball: Ball = {
       ...original,
       x: original.x + original.vx * dtSeconds,
       y: original.y + original.vy * dtSeconds,
     };
+    // Tracks whether *any* collision (wall, brick, or red bonus ball)
+    // happened to this ball this tick — the minimum-vertical-velocity
+    // safety net below only ever runs immediately alongside a real
+    // collision, never on an ordinary straight-line frame.
+    let collidedThisTick = false;
 
-    // Left/right walls.
+    // Left/right walls: vx flips sign, vy is untouched.
     if (ball.x - ball.radius < 0) {
       ball = { ...ball, x: ball.radius, vx: Math.abs(ball.vx) };
+      collidedThisTick = true;
     } else if (ball.x + ball.radius > BOARD_WIDTH) {
       ball = { ...ball, x: BOARD_WIDTH - ball.radius, vx: -Math.abs(ball.vx) };
+      collidedThisTick = true;
     }
-    // Top wall.
+    // Top wall: vy flips sign, vx is untouched.
     if (ball.y - ball.radius < 0) {
       ball = { ...ball, y: ball.radius, vy: Math.abs(ball.vy) };
+      collidedThisTick = true;
     }
 
     // Past the bottom of the board: this ball has returned — no more
@@ -138,8 +151,9 @@ export function stepBalls(
       return { ...ball, active: false };
     }
 
-    // At most one brick collision per ball per tick.
-    let collidedThisTick = false;
+    // At most one cell collision (brick OR red bonus ball, never both)
+    // per ball per tick.
+    let collidedWithCell = false;
     for (const brick of remainingBricks) {
       if (brick.hp <= 0) {
         continue;
@@ -153,11 +167,11 @@ export function stepBalls(
       const updatedBrick: Brick = { ...brick, hp };
       remainingBricks = remainingBricks.map((b) => (b === brick ? updatedBrick : b));
       hits.push({ brick: updatedBrick, destroyed: hp <= 0 });
-      collidedThisTick = true;
+      collidedWithCell = true;
       break;
     }
 
-    if (!collidedThisTick) {
+    if (!collidedWithCell) {
       for (const redBall of remainingRedBalls) {
         const collision = circleVsCell(ball, redBall.row, redBall.col);
         if (!collision) {
@@ -166,11 +180,14 @@ export function stepBalls(
         ball = applyCollision(ball, collision);
         remainingRedBalls = remainingRedBalls.filter((r) => r !== redBall);
         collected.push(redBall);
+        collidedWithCell = true;
         break;
       }
     }
 
-    const [vx, vy] = enforceMinimumVerticalVelocity(ball.vx, ball.vy);
+    collidedThisTick = collidedThisTick || collidedWithCell;
+
+    const [vx, vy] = collidedThisTick ? enforceMinimumVerticalVelocity(ball.vx, ball.vy) : [ball.vx, ball.vy];
     return { ...ball, vx, vy };
   });
 
