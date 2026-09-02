@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  BALL_SPREAD_RADIANS,
   BASE_BALL_SPEED,
   BOARD_COLS,
   BOARD_ROWS,
@@ -119,13 +118,34 @@ describe("generateFormation (bricks + red bonus balls together)", () => {
   });
 
   it("a red bonus ball is separate from the MAX_NEW_BRICKS_PER_TURN cap (bricks alone can still hit the cap)", () => {
-    const { bricks, redBonusBalls } = generateFormation(30, new SequenceRandomSource([0.01, 0.99, 0.99, 0.99, 0.99]));
+    const { bricks, redBonusBalls } = generateFormation(30, new SequenceRandomSource([0.99, 0.99, 0.99, 0.99]));
     expect(bricks.length).toBeLessThanOrEqual(MAX_NEW_BRICKS_PER_TURN);
-    // With a near-guaranteed spawn roll (0.01) and a full brick batch not
-    // consuming every column, a red bonus ball can still appear alongside
-    // a full-size brick batch.
-    if (bricks.length < BOARD_COLS) {
-      expect(redBonusBalls.length).toBeLessThanOrEqual(1);
+    // A full-size brick batch still leaves room for the guaranteed red
+    // bonus ball, since MAX_NEW_BRICKS_PER_TURN (5) is less than BOARD_COLS (7).
+    expect(redBonusBalls.length).toBe(1);
+  });
+
+  it("every generated round contains at least 1 red bonus ball — never 0 — regardless of round or randomness", () => {
+    // A spread of random sequences (varying which cell/column gets picked)
+    // across many rounds; every single one must still produce exactly 1
+    // red bonus ball, since it is no longer a chance-gated spawn.
+    const sequences = [
+      [0.0, 0.0, 0.0, 0.0],
+      [0.99, 0.99, 0.99, 0.99],
+      [0.5, 0.5, 0.5, 0.5],
+      [0.13, 0.77, 0.42, 0.9],
+    ];
+    for (let level = 1; level <= 40; level++) {
+      for (const seq of sequences) {
+        const { bricks, redBonusBalls } = generateFormation(level, new SequenceRandomSource(seq));
+        expect(redBonusBalls.length).toBeGreaterThanOrEqual(1);
+        expect(redBonusBalls.length).toBe(1); // never 0, and this implementation never produces more than 1
+        const brickCols = new Set(bricks.map((b) => b.col));
+        for (const r of redBonusBalls) {
+          expect(brickCols.has(r.col)).toBe(false); // never overlaps a brick
+          expect(r.row).toBe(FORMATION_TOP_ROW);
+        }
+      }
     }
   });
 });
@@ -692,7 +712,7 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
     expect(ballDir.y).toBeCloseTo(guideDir.y, 10);
   });
 
-  it("multiple balls: each receives its own fixed direction exactly once at launch, and holds it every frame until a collision", () => {
+  it("multiple balls: every ball receives the exact same fixed direction at launch, and holds it every frame until a collision", () => {
     const game = newGame();
     let state = game.start(game.createInitialState());
     state = { ...state, ballCount: 5, level: 5 };
@@ -700,11 +720,12 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
     state = game.handleInput(state, { type: "fire" });
 
     expect(state.balls).toHaveLength(5);
-    // Not every ball shares the same direction (a controlled spread, not
-    // all-identical) — but each individual ball's own direction is fixed.
+    // Every ball shares the EXACT same launch direction — no spread at all.
     const launchDirections = state.balls.map((b) => ({ vx: b.vx, vy: b.vy }));
-    const allSame = launchDirections.every((d) => d.vx === launchDirections[0].vx);
-    expect(allSame).toBe(false);
+    const allSame = launchDirections.every(
+      (d) => d.vx === launchDirections[0].vx && d.vy === launchDirections[0].vy,
+    );
+    expect(allSame).toBe(true);
 
     // Advance several frames with nothing to collide with — every ball
     // must still carry the exact same vx/vy it launched with (no
@@ -734,43 +755,27 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
     }
   });
 
-  it("no wide angular fan: every ball's direction stays within BALL_SPREAD_RADIANS of the aim, no matter how many balls fire", () => {
-    for (const ballCount of [2, 5, 10, 20, 50]) {
+  it("strict straight-line volley: 1, 2, 10, and 50 balls all launch with EXACTLY the same direction (no spread constant, no per-ball offset)", () => {
+    for (const ballCount of [1, 2, 10, 50]) {
       const game = newGame();
       let state = game.start(game.createInitialState());
       state = { ...state, ballCount, level: ballCount };
-      const aimAngle = 0.1;
-      state = game.handleInput(state, { type: "aim", angleRad: aimAngle });
+      state = game.handleInput(state, { type: "aim", angleRad: 0.37 });
       state = game.handleInput(state, { type: "fire" });
 
+      expect(state.balls).toHaveLength(ballCount);
+      const first = state.balls[0];
       for (const b of state.balls) {
-        const speed = Math.hypot(b.vx, b.vy);
-        const ballAngle = Math.atan2(b.vx / speed, -b.vy / speed);
-        // The whole group stays within a fixed, tiny band around the aim
-        // — not a fan that widens as more balls join the volley.
-        expect(Math.abs(ballAngle - aimAngle)).toBeLessThanOrEqual(BALL_SPREAD_RADIANS + 1e-9);
+        // Bit-for-bit identical vx/vy across the whole volley — not
+        // merely "close": zero angular offset of any kind.
+        expect(b.vx).toBe(first.vx);
+        expect(b.vy).toBe(first.vy);
       }
-    }
-  });
 
-  it("multi-ball offsets are a fixed +/-BALL_SPREAD_RADIANS, never scaled by ball index (the previous shotgun-fan bug)", () => {
-    const game = newGame();
-    let state = game.start(game.createInitialState());
-    state = { ...state, ballCount: 12, level: 12 };
-    state = game.handleInput(state, { type: "aim", angleRad: 0 });
-    state = game.handleInput(state, { type: "fire" });
-
-    const angles = state.balls.map((b) => {
-      const speed = Math.hypot(b.vx, b.vy);
-      return Math.atan2(b.vx / speed, -b.vy / speed);
-    });
-    const distinctOffsets = new Set(angles.map((a) => Math.round((a - 0) * 1e6) / 1e6));
-    // Only ever 3 distinct headings across the whole volley: the exact
-    // aim, aim - spread, and aim + spread — never a growing ladder of
-    // increasingly wide offsets per ball.
-    expect(distinctOffsets.size).toBeLessThanOrEqual(3);
-    for (const a of angles) {
-      expect(Math.abs(a)).toBeLessThanOrEqual(BALL_SPREAD_RADIANS + 1e-9);
+      // And that shared direction is exactly the aim direction.
+      const speed = Math.hypot(first.vx, first.vy);
+      const angle = Math.atan2(first.vx / speed, -first.vy / speed);
+      expect(angle).toBeCloseTo(0.37, 10);
     }
   });
 });
@@ -803,7 +808,8 @@ describe("SwipeBrickBreakerGame — game over", () => {
     expect(restarted.level).toBe(1);
     expect(restarted.ballCount).toBe(1);
     expect(restarted.balls).toHaveLength(0);
-    expect(restarted.redBonusBalls).toHaveLength(0);
+    // Round 1's formation always includes its guaranteed red bonus ball.
+    expect(restarted.redBonusBalls).toHaveLength(1);
   });
 
   it("a red bonus ball reaching the bottom boundary is simply lost — it does NOT trigger Game Over", () => {

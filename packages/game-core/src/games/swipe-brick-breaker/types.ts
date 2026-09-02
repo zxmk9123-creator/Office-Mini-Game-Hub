@@ -52,25 +52,11 @@ export const MAX_BALL_SPEED = 20; // 2x the original 10
 /** Never spawn more than this many new bricks in a single turn. Red bonus balls are separate from this cap. */
 export const MAX_NEW_BRICKS_PER_TURN = 5;
 
-/** Chance, per turn, that a single red bonus ball spawns alongside that turn's bricks. */
-export const RED_BONUS_BALL_SPAWN_CHANCE = 0.2;
-
 /** Row 0 is a permanent empty buffer — nothing may ever spawn or persist there. The active formation area is rows 1..BOARD_ROWS-1. */
 export const FORMATION_TOP_ROW = 1;
 
 /** Aim is clamped to this many radians either side of straight up — never horizontal or downward. */
 export const MAX_AIM_RADIANS = (70 * Math.PI) / 180;
-
-/**
- * Fixed angular offset applied to balls after the first in a multi-ball
- * volley — purely for visual separation, not a spread mechanic. Every
- * ball after the first alternates between -BALL_SPREAD_RADIANS and
- * +BALL_SPREAD_RADIANS around the aimed direction; this value is never
- * multiplied by ball index/count, so the total fan width stays exactly
- * this tiny either way no matter how many balls are in the volley (level
- * 2 or level 50) — the whole group travels essentially straight together.
- */
-export const BALL_SPREAD_RADIANS = (1.5 * Math.PI) / 180;
 
 export interface Brick {
   row: number;

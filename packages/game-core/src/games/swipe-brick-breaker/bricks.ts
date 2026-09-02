@@ -2,7 +2,6 @@ import {
   BOARD_COLS,
   FORMATION_TOP_ROW,
   MAX_NEW_BRICKS_PER_TURN,
-  RED_BONUS_BALL_SPAWN_CHANCE,
   type Brick,
   type RandomSource,
   type RedBonusBall,
@@ -50,12 +49,14 @@ export function generateBricks(level: number, random: RandomSource): Brick[] {
 }
 
 /**
- * Generates this turn's full new formation — bricks and (rarely) a red
- * bonus ball — as one call, so the two never collide: the bonus ball, if
- * any, only ever picks from columns the bricks didn't already take.
- * Bricks are capped at MAX_NEW_BRICKS_PER_TURN; the red bonus ball is
- * entirely separate from that cap (0 or 1 per turn, never counted against
- * it). Both always spawn at FORMATION_TOP_ROW — row 0 stays empty.
+ * Generates this turn's full new formation — bricks and exactly one red
+ * bonus ball — as one call, so the two never collide: the bonus ball only
+ * ever picks from columns the bricks didn't already take. Bricks are
+ * capped at MAX_NEW_BRICKS_PER_TURN (5 of the board's 7 columns at most),
+ * which always leaves at least one column free for the bonus ball; it is
+ * entirely separate from that cap and never counted against it. Every
+ * round guarantees at least 1 red bonus ball — never 0. Both always spawn
+ * at FORMATION_TOP_ROW — row 0 stays empty.
  */
 export function generateFormation(
   level: number,
@@ -66,7 +67,7 @@ export function generateFormation(
   const remainingCols = Array.from({ length: BOARD_COLS }, (_, i) => i).filter((c) => !takenCols.has(c));
 
   const redBonusBalls: RedBonusBall[] = [];
-  if (remainingCols.length > 0 && random.next() < RED_BONUS_BALL_SPAWN_CHANCE) {
+  if (remainingCols.length > 0) {
     const col = remainingCols[Math.floor(random.next() * remainingCols.length)];
     redBonusBalls.push({ row: FORMATION_TOP_ROW, col });
   }

@@ -4,7 +4,6 @@ import { generateFormation } from "./bricks";
 import { stepBalls } from "./physics";
 import {
   BALL_RADIUS,
-  BALL_SPREAD_RADIANS,
   BASE_BALL_SPEED,
   BOARD_HEIGHT,
   BOARD_ROWS,
@@ -49,22 +48,21 @@ function speedForLevel(level: number): number {
 
 function launchBalls(ballCount: number, aimAngleRad: number, level: number): Ball[] {
   const speed = speedForLevel(level);
+  // Every ball in the volley fires along the exact same clamped aim
+  // direction as the player's drag — no per-ball angular offset, spread,
+  // or index-based adjustment of any kind. A volley must never fan out;
+  // constant velocity is preserved from launch until an actual wall/brick
+  // collision changes it via reflection.
+  const angle = clampAim(aimAngleRad);
+  const vx = speed * Math.sin(angle);
+  const vy = -speed * Math.cos(angle);
   const balls: Ball[] = [];
   for (let i = 0; i < ballCount; i++) {
-    // Ball 0 fires exactly on the aimed line — the same direction the aim
-    // guide showed. Every subsequent ball gets a tiny fixed, deterministic
-    // offset (alternating -/+ BALL_SPREAD_RADIANS) purely so multiple
-    // balls don't perfectly overlap forever; it is NEVER scaled by ball
-    // index/count, so the whole volley — 2 balls or 50 — stays a tight,
-    // essentially parallel group rather than fanning out wider as more
-    // balls join. This is deliberately not a shotgun-spread mechanic.
-    const sign = i % 2 === 0 ? -1 : 1;
-    const angle = clampAim(aimAngleRad + (i === 0 ? 0 : sign * BALL_SPREAD_RADIANS));
     balls.push({
       x: LAUNCH_X,
       y: LAUNCH_Y,
-      vx: speed * Math.sin(angle),
-      vy: -speed * Math.cos(angle),
+      vx,
+      vy,
       radius: BALL_RADIUS,
       active: true,
     });
