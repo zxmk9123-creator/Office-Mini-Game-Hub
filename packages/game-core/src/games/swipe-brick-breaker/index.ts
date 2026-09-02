@@ -17,6 +17,7 @@ export {
   MAX_BALL_SPEED,
   MAX_NEW_BRICKS_PER_TURN,
   MAX_AIM_RADIANS,
+  BALL_LAUNCH_STAGGER_MS,
   type RandomSource,
   type Brick,
   type Ball,

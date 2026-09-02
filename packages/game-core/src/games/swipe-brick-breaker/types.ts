@@ -58,6 +58,14 @@ export const FORMATION_TOP_ROW = 1;
 /** Aim is clamped to this many radians either side of straight up — never horizontal or downward. */
 export const MAX_AIM_RADIANS = (70 * Math.PI) / 180;
 
+/**
+ * Fixed delay, in ms, between one ball's launch and the next one's in the
+ * same volley — purely a visual "one after another" stagger, never an
+ * angular offset. Small enough that a multi-ball volley still feels
+ * snappy, not sluggish.
+ */
+export const BALL_LAUNCH_STAGGER_MS = 60;
+
 export interface Brick {
   row: number;
   col: number;
@@ -73,6 +81,14 @@ export interface Ball {
   vy: number;
   radius: number;
   active: boolean;
+  /**
+   * Time, in ms, remaining before this ball starts moving — 0 once
+   * launched. Balls after the first in a volley start with this > 0 (a
+   * multiple of BALL_LAUNCH_STAGGER_MS) purely to stagger *when* they
+   * begin moving; it never affects direction/velocity, which is fixed
+   * identically for every ball in the volley at launch time.
+   */
+  launchDelayMs: number;
 }
 
 /**

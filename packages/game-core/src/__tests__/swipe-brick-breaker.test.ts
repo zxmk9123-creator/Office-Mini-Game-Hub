@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BALL_LAUNCH_STAGGER_MS,
   BASE_BALL_SPEED,
   BOARD_COLS,
   BOARD_ROWS,
@@ -152,7 +153,7 @@ describe("generateFormation (bricks + red bonus balls together)", () => {
 
 describe("stepBalls (collision physics)", () => {
   function ball(overrides: Partial<Ball> = {}): Ball {
-    return { x: 3.5, y: 3.5, vx: 0, vy: -1, radius: 0.12, active: true, ...overrides };
+    return { x: 3.5, y: 3.5, vx: 0, vy: -1, radius: 0.12, active: true, launchDelayMs: 0, ...overrides };
   }
 
   it("reflects off the left wall", () => {
@@ -269,7 +270,7 @@ describe("stepBalls (collision physics)", () => {
 
 describe("stepBalls — strictly linear trajectory between collisions", () => {
   function ball(overrides: Partial<Ball> = {}): Ball {
-    return { x: 3.5, y: 3.5, vx: 0, vy: -1, radius: 0.12, active: true, ...overrides };
+    return { x: 3.5, y: 3.5, vx: 0, vy: -1, radius: 0.12, active: true, launchDelayMs: 0, ...overrides };
   }
 
   it("stays on the exact mathematical line P(t) = P + Vt across many frames with no collision", () => {
@@ -776,6 +777,86 @@ describe("SwipeBrickBreakerGame — volley/fire", () => {
       const speed = Math.hypot(first.vx, first.vy);
       const angle = Math.atan2(first.vx / speed, -first.vy / speed);
       expect(angle).toBeCloseTo(0.37, 10);
+    }
+  });
+
+  it("balls launch sequentially with a small fixed delay, not all at once: at fire, only ball 0 has started moving", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, ballCount: 4, level: 4 };
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+
+    expect(state.balls).toHaveLength(4);
+    expect(state.balls[0].launchDelayMs).toBe(0);
+    // Every ball after the first waits an increasing, exactly staggered
+    // amount before it starts moving.
+    for (let i = 1; i < state.balls.length; i++) {
+      expect(state.balls[i].launchDelayMs).toBe(i * BALL_LAUNCH_STAGGER_MS);
+    }
+
+    // Immediately at fire (0 elapsed time), only ball 0 has moved off the
+    // launch point — every later ball is still parked exactly at launch.
+    const launchX = state.balls[0].x;
+    const launchY = state.balls[0].y;
+    for (let i = 1; i < state.balls.length; i++) {
+      expect(state.balls[i].x).toBe(launchX);
+      expect(state.balls[i].y).toBe(launchY);
+    }
+  });
+
+  it("each ball starts moving only once its own countdown elapses, then keeps the same constant velocity as every other ball", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, ballCount: 3, level: 3, bricks: [], redBonusBalls: [] };
+    state = game.handleInput(state, { type: "aim", angleRad: 0 });
+    state = game.handleInput(state, { type: "fire" });
+
+    const launchY = state.balls[0].y;
+    const hasMoved = (b: (typeof state.balls)[number]) => b.y !== launchY;
+
+    // One tick just short of ball 1's stagger: only ball 0 has moved.
+    state = game.handleInput(state, { type: "tick", dtMs: BALL_LAUNCH_STAGGER_MS - 5 });
+    expect(hasMoved(state.balls[0])).toBe(true);
+    expect(hasMoved(state.balls[1])).toBe(false);
+    expect(hasMoved(state.balls[2])).toBe(false);
+
+    // Cross ball 1's stagger threshold: ball 1 has now started moving too, ball 2 still hasn't.
+    state = game.handleInput(state, { type: "tick", dtMs: 10 });
+    expect(hasMoved(state.balls[1])).toBe(true);
+    expect(hasMoved(state.balls[2])).toBe(false);
+
+    // Cross ball 2's stagger threshold as well.
+    state = game.handleInput(state, { type: "tick", dtMs: BALL_LAUNCH_STAGGER_MS });
+    expect(hasMoved(state.balls[2])).toBe(true);
+
+    // Once launched, every ball carries the exact same vx/vy — the
+    // stagger only ever changed WHEN each ball started moving, never its
+    // direction or speed.
+    const [b0, b1, b2] = state.balls;
+    expect(b1.vx).toBe(b0.vx);
+    expect(b1.vy).toBe(b0.vy);
+    expect(b2.vx).toBe(b0.vx);
+    expect(b2.vy).toBe(b0.vy);
+  });
+
+  it("no angular spread across a staggered multi-ball volley: every ball's direction is bit-for-bit identical once launched", () => {
+    const game = newGame();
+    let state = game.start(game.createInitialState());
+    state = { ...state, ballCount: 6, level: 6, bricks: [], redBonusBalls: [] };
+    state = game.handleInput(state, { type: "aim", angleRad: -0.4 });
+    state = game.handleInput(state, { type: "fire" });
+
+    // Advance well past the last ball's stagger so every ball is launched.
+    for (let i = 0; i < 20; i++) {
+      state = game.handleInput(state, { type: "tick", dtMs: BALL_LAUNCH_STAGGER_MS });
+    }
+
+    expect(state.balls.every((b) => b.launchDelayMs === 0)).toBe(true);
+    const [first, ...rest] = state.balls;
+    for (const b of rest) {
+      expect(b.vx).toBe(first.vx);
+      expect(b.vy).toBe(first.vy);
     }
   });
 });

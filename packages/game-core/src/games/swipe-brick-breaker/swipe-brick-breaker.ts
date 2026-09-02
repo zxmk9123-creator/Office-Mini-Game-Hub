@@ -3,6 +3,7 @@ import type { Clock } from "../reaction-test/types";
 import { generateFormation } from "./bricks";
 import { stepBalls } from "./physics";
 import {
+  BALL_LAUNCH_STAGGER_MS,
   BALL_RADIUS,
   BASE_BALL_SPEED,
   BOARD_HEIGHT,
@@ -52,7 +53,10 @@ function launchBalls(ballCount: number, aimAngleRad: number, level: number): Bal
   // direction as the player's drag — no per-ball angular offset, spread,
   // or index-based adjustment of any kind. A volley must never fan out;
   // constant velocity is preserved from launch until an actual wall/brick
-  // collision changes it via reflection.
+  // collision changes it via reflection. The only per-ball difference is
+  // WHEN it starts moving: ball i waits i * BALL_LAUNCH_STAGGER_MS before
+  // its velocity takes effect, producing a "one after another" visual
+  // launch while every ball still ends up on the exact same line.
   const angle = clampAim(aimAngleRad);
   const vx = speed * Math.sin(angle);
   const vy = -speed * Math.cos(angle);
@@ -65,6 +69,7 @@ function launchBalls(ballCount: number, aimAngleRad: number, level: number): Bal
       vy,
       radius: BALL_RADIUS,
       active: true,
+      launchDelayMs: i * BALL_LAUNCH_STAGGER_MS,
     });
   }
   return balls;
@@ -176,12 +181,28 @@ export class SwipeBrickBreakerGame
       return state;
     }
 
-    const { balls, bricks, redBonusBalls, hits, collected } = stepBalls(
-      state.balls,
-      state.bricks,
-      state.redBonusBalls,
-      dtMs / 1000,
+    // Balls still waiting out their launch stagger don't move or collide
+    // this tick — only their countdown advances. Everything else (an
+    // already-launched ball, or one whose delay just elapsed) is handed to
+    // physics as normal; physics itself is untouched by staggering.
+    const withCountdown = state.balls.map((b) =>
+      b.launchDelayMs > 0 ? { ...b, launchDelayMs: Math.max(0, b.launchDelayMs - dtMs) } : b,
     );
+    const readyIndices: number[] = [];
+    const readyBalls: Ball[] = [];
+    withCountdown.forEach((b, i) => {
+      if (b.active && b.launchDelayMs <= 0) {
+        readyIndices.push(i);
+        readyBalls.push(b);
+      }
+    });
+
+    const stepResult = stepBalls(readyBalls, state.bricks, state.redBonusBalls, dtMs / 1000);
+    const balls = [...withCountdown];
+    readyIndices.forEach((ballIndex, resultIndex) => {
+      balls[ballIndex] = stepResult.balls[resultIndex];
+    });
+    const { bricks, redBonusBalls, hits, collected } = stepResult;
 
     let scoreDelta = 0;
     for (const hit of hits) {
