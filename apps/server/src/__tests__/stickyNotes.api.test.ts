@@ -51,6 +51,50 @@ describe("Sticky Notes API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("creates a sticky note with a default width/height when omitted", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "no size given" });
+    expect(res.status).toBe(201);
+    expect(typeof res.body.width).toBe("number");
+    expect(typeof res.body.height).toBe("number");
+    expect(res.body.width).toBeGreaterThan(0);
+    expect(res.body.height).toBeGreaterThan(0);
+  });
+
+  it("creates a sticky note at an explicit width/height and persists it", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "sized", width: 260, height: 220 });
+    expect(res.status).toBe(201);
+    expect(res.body.width).toBe(260);
+    expect(res.body.height).toBe(220);
+  });
+
+  it("updates width/height and returns the new dimensions", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "resizable" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ width: 300, height: 240 });
+    expect(res.status).toBe(200);
+    expect(res.body.width).toBe(300);
+    expect(res.body.height).toBe(240);
+  });
+
+  it("rejects a width/height below the minimum on create", async () => {
+    const res = await request(app).post("/api/sticky-notes").send({ content: "too small", width: 10, height: 10 });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a width/height below the minimum on update", async () => {
+    const created = await request(app).post("/api/sticky-notes").send({ content: "resizable" });
+    const res = await request(app).patch(`/api/sticky-notes/${created.body.id}`).send({ width: 50 });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a non-finite or non-positive width/height", async () => {
+    const nan = await request(app).post("/api/sticky-notes").send({ content: "x", width: "not-a-number" });
+    expect(nan.status).toBe(400);
+    const negative = await request(app).post("/api/sticky-notes").send({ content: "x", width: -200, height: 200 });
+    expect(negative.status).toBe(400);
+    const zero = await request(app).post("/api/sticky-notes").send({ content: "x", width: 200, height: 0 });
+    expect(zero.status).toBe(400);
+  });
+
   it("creates a sticky note with an explicit color", async () => {
     const res = await request(app).post("/api/sticky-notes").send({ content: "Call back", color: "blue" });
     expect(res.status).toBe(201);

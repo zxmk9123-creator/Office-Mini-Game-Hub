@@ -139,6 +139,8 @@ export interface StickyNoteDto {
   pinned: boolean;
   x: number;
   y: number;
+  width: number;
+  height: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -152,13 +154,23 @@ export function createStickyNote(input: {
   color?: StickyNoteColor;
   x?: number;
   y?: number;
+  width?: number;
+  height?: number;
 }): Promise<StickyNoteDto> {
   return request<StickyNoteDto>("/sticky-notes", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function updateStickyNote(
   id: string,
-  input: { content?: string; color?: StickyNoteColor; pinned?: boolean; x?: number; y?: number },
+  input: {
+    content?: string;
+    color?: StickyNoteColor;
+    pinned?: boolean;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  },
 ): Promise<StickyNoteDto> {
   return request<StickyNoteDto>(`/sticky-notes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }

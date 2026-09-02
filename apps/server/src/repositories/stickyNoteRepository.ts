@@ -8,17 +8,26 @@ export interface StickyNoteRecord {
   pinned: boolean;
   x: number;
   y: number;
+  width: number;
+  height: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface StickyNoteRepository {
-  create(input: { content: string; color: string; x: number; y: number }): Promise<StickyNoteRecord>;
+  create(input: {
+    content: string;
+    color: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<StickyNoteRecord>;
   findAll(): Promise<StickyNoteRecord[]>;
   findById(id: string): Promise<StickyNoteRecord | null>;
   update(
     id: string,
-    input: { content?: string; color?: string; pinned?: boolean; x?: number; y?: number },
+    input: { content?: string; color?: string; pinned?: boolean; x?: number; y?: number; width?: number; height?: number },
   ): Promise<StickyNoteRecord | null>;
   delete(id: string): Promise<boolean>;
 }
@@ -26,7 +35,14 @@ export interface StickyNoteRepository {
 export class DrizzleStickyNoteRepository implements StickyNoteRepository {
   constructor(private readonly db: Database) {}
 
-  async create(input: { content: string; color: string; x: number; y: number }): Promise<StickyNoteRecord> {
+  async create(input: {
+    content: string;
+    color: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<StickyNoteRecord> {
     const [row] = await this.db.insert(stickyNotes).values(input).returning();
     return row;
   }
@@ -43,7 +59,7 @@ export class DrizzleStickyNoteRepository implements StickyNoteRepository {
 
   async update(
     id: string,
-    input: { content?: string; color?: string; pinned?: boolean; x?: number; y?: number },
+    input: { content?: string; color?: string; pinned?: boolean; x?: number; y?: number; width?: number; height?: number },
   ): Promise<StickyNoteRecord | null> {
     const [row] = await this.db
       .update(stickyNotes)

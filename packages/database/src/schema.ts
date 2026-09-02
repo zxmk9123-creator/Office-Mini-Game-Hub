@@ -67,6 +67,11 @@ export const stickyNotes = pgTable("sticky_notes", {
   // on-screen position via this same column default.
   x: doublePrecision("x").notNull().default(24),
   y: doublePrecision("y").notNull().default(24),
+  // Freeform canvas size, in pixels. Defaulted so existing rows (added
+  // before resizing existed) get a sensible on-screen size via this same
+  // column default.
+  width: doublePrecision("width").notNull().default(200),
+  height: doublePrecision("height").notNull().default(160),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

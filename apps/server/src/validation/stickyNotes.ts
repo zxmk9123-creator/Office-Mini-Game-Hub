@@ -5,6 +5,8 @@ export const createStickyNoteRequestSchema = z.object({
   color: z.string().optional(),
   x: z.number().finite().optional(),
   y: z.number().finite().optional(),
+  width: z.number().finite().positive().optional(),
+  height: z.number().finite().positive().optional(),
 });
 
 export const updateStickyNoteRequestSchema = z.object({
@@ -13,6 +15,8 @@ export const updateStickyNoteRequestSchema = z.object({
   pinned: z.boolean().optional(),
   x: z.number().finite().optional(),
   y: z.number().finite().optional(),
+  width: z.number().finite().positive().optional(),
+  height: z.number().finite().positive().optional(),
 });
 
 export const stickyNoteIdParamsSchema = z.object({

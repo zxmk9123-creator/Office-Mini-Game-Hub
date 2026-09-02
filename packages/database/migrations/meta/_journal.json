@@ -43,6 +43,13 @@
       "when": 1788322678967,
       "tag": "0005_friendly_vengeance",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788323567581,
+      "tag": "0006_light_thundra",
+      "breakpoints": true
     }
   ]
 }

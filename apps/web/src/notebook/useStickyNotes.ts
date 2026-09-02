@@ -18,6 +18,7 @@ export interface StickyNotesState {
   togglePinned: (id: string, pinned: boolean) => Promise<void>;
   setColor: (id: string, color: StickyNoteColor) => Promise<void>;
   updatePosition: (id: string, x: number, y: number) => Promise<void>;
+  updateSize: (id: string, width: number, height: number) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -82,6 +83,10 @@ export function useStickyNotes(): StickyNotesState {
   const togglePinned = useCallback((id: string, pinned: boolean) => applyUpdate(id, { pinned }), [applyUpdate]);
   const setColor = useCallback((id: string, color: StickyNoteColor) => applyUpdate(id, { color }), [applyUpdate]);
   const updatePosition = useCallback((id: string, x: number, y: number) => applyUpdate(id, { x, y }), [applyUpdate]);
+  const updateSize = useCallback(
+    (id: string, width: number, height: number) => applyUpdate(id, { width, height }),
+    [applyUpdate],
+  );
 
   const remove = useCallback(async (id: string) => {
     setError(null);
@@ -93,5 +98,16 @@ export function useStickyNotes(): StickyNotesState {
     }
   }, []);
 
-  return { stickyNotes, loading, error, create, saveContent, togglePinned, setColor, updatePosition, remove };
+  return {
+    stickyNotes,
+    loading,
+    error,
+    create,
+    saveContent,
+    togglePinned,
+    setColor,
+    updatePosition,
+    updateSize,
+    remove,
+  };
 }

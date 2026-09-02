@@ -22,6 +22,8 @@ const NOTE_A = {
   pinned: false,
   x: 100,
   y: 60,
+  width: 200,
+  height: 160,
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -211,5 +213,97 @@ describe("StickyNotesView", () => {
     expect(left).toBeLessThanOrEqual(window.innerWidth);
     expect(left).toBeGreaterThanOrEqual(0);
     expect(top).toBeGreaterThanOrEqual(0);
+  });
+
+  describe("resizing", () => {
+    it("renders a resize handle for each note", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      expect(await screen.findByTestId("sticky-note-resize-s1")).toBeTruthy();
+    });
+
+    it("renders at its persisted width/height", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      expect(noteEl.style.width).toBe("200px");
+      expect(noteEl.style.height).toBe("160px");
+    });
+
+    it("pointer movement on the handle changes width and height live", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+
+      expect(noteEl.style.width).toBe("240px");
+      expect(noteEl.style.height).toBe("200px");
+    });
+
+    it("persists the final dimensions only on pointer up, not on every pointer move", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      mockedUpdateStickyNote.mockResolvedValue({ ...NOTE_A, width: 240, height: 200 });
+      render(<StickyNotesView />);
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 320, clientY: 280 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+      expect(mockedUpdateStickyNote).not.toHaveBeenCalled();
+
+      firePointer(handle, "pointerup", { clientX: 340, clientY: 300 });
+      await waitFor(() =>
+        expect(mockedUpdateStickyNote).toHaveBeenCalledWith("s1", { width: 240, height: 200 }),
+      );
+      expect(mockedUpdateStickyNote).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not start a note drag when resizing", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+
+      // Position is untouched — only width/height changed.
+      expect(noteEl.style.left).toBe("100px");
+      expect(noteEl.style.top).toBe("60px");
+    });
+
+    it("enforces the minimum width and height", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: -5000, clientY: -5000 });
+
+      expect(Number.parseFloat(noteEl.style.width)).toBeGreaterThanOrEqual(180);
+      expect(Number.parseFloat(noteEl.style.height)).toBeGreaterThanOrEqual(120);
+    });
+
+    it("restores the last persisted dimensions and reports an error if saving fails", async () => {
+      mockedListStickyNotes.mockResolvedValue([NOTE_A]);
+      mockedUpdateStickyNote.mockRejectedValue(new Error("network error"));
+      render(<StickyNotesView />);
+      const noteEl = await screen.findByTestId("sticky-note-s1");
+      const handle = await screen.findByTestId("sticky-note-resize-s1");
+
+      firePointer(handle, "pointerdown", { clientX: 300, clientY: 260 });
+      firePointer(handle, "pointermove", { clientX: 340, clientY: 300 });
+      firePointer(handle, "pointerup", { clientX: 340, clientY: 300 });
+
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      // The store was never updated (the request rejected), so the note
+      // falls back to rendering its last-known-good persisted size.
+      await waitFor(() => expect(noteEl.style.width).toBe("200px"));
+      expect(noteEl.style.height).toBe("160px");
+    });
   });
 });

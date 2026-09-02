@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStickyNotes } from "./useStickyNotes";
 import type { StickyNoteColor, StickyNoteDto } from "../api/client";
-import { clampPosition, STICKY_NOTE_WIDTH } from "./stickyNoteLayout";
+import { clampPosition, clampSize } from "./stickyNoteLayout";
 
 const COLORS: StickyNoteColor[] = ["yellow", "pink", "blue", "green", "purple"];
 
@@ -52,6 +52,14 @@ interface DragState {
   startNoteY: number;
 }
 
+interface ResizeState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startWidth: number;
+  startHeight: number;
+}
+
 function StickyNoteCard({
   note,
   zIndex,
@@ -63,6 +71,7 @@ function StickyNoteCard({
   onSetColor,
   onDelete,
   onPositionCommit,
+  onSizeCommit,
 }: {
   note: StickyNoteDto;
   zIndex: number;
@@ -74,19 +83,24 @@ function StickyNoteCard({
   onSetColor: (color: StickyNoteColor) => void;
   onDelete: () => void;
   onPositionCommit: (x: number, y: number) => void;
+  onSizeCommit: (width: number, height: number) => void;
 }) {
   const [content, setContent] = useState(note.content);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  const [resizeSize, setResizeSize] = useState<{ width: number; height: number } | null>(null);
+  const resizeStateRef = useRef<ResizeState | null>(null);
 
   const persistedPosition = clampPosition(note.x, note.y, viewportWidth, viewportHeight);
   const position = dragPosition ?? persistedPosition;
+  const size = resizeSize ?? { width: note.width, height: note.height };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Interactive controls (buttons) and the editable textarea drive their
-    // own behavior — starting a drag from them would fight typing/clicking.
+    // Interactive controls (buttons), the editable textarea, and the resize
+    // handle each drive their own behavior — starting a drag from any of
+    // them would fight typing/clicking/resizing.
     const target = e.target as HTMLElement;
-    if (target.closest("textarea, button")) {
+    if (target.closest("textarea, button, [data-resize-handle]")) {
       return;
     }
     onFocus();
@@ -129,6 +143,57 @@ function StickyNoteCard({
     }
   };
 
+  const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Isolated from drag: this never reaches the card's own onPointerDown.
+    e.stopPropagation();
+    e.preventDefault();
+    onFocus();
+    resizeStateRef.current = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startWidth: note.width,
+      startHeight: note.height,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setResizeSize({ width: note.width, height: note.height });
+  };
+
+  const handleResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const resize = resizeStateRef.current;
+    if (!resize || resize.pointerId !== e.pointerId) {
+      return;
+    }
+    const dx = e.clientX - resize.startClientX;
+    const dy = e.clientY - resize.startClientY;
+    setResizeSize(
+      clampSize(
+        resize.startWidth + dx,
+        resize.startHeight + dy,
+        viewportWidth - position.x,
+        viewportHeight - position.y,
+      ),
+    );
+  };
+
+  const endResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const resize = resizeStateRef.current;
+    if (!resize || resize.pointerId !== e.pointerId) {
+      return;
+    }
+    resizeStateRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    const finalSize = resizeSize;
+    setResizeSize(null);
+    if (finalSize && (finalSize.width !== note.width || finalSize.height !== note.height)) {
+      onSizeCommit(finalSize.width, finalSize.height);
+    }
+  };
+
   return (
     <div
       data-testid={`sticky-note-${note.id}`}
@@ -136,7 +201,14 @@ function StickyNoteCard({
       onPointerMove={handlePointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      style={{ position: "absolute", left: position.x, top: position.y, width: STICKY_NOTE_WIDTH, zIndex }}
+      style={{
+        position: "absolute",
+        left: position.x,
+        top: position.y,
+        width: size.width,
+        height: size.height,
+        zIndex,
+      }}
       className={`pointer-events-auto flex touch-none select-none flex-col gap-1.5 rounded-sm border p-2 shadow-sm ${
         dragPosition ? "cursor-grabbing shadow-md" : "cursor-grab"
       } ${COLOR_CLASSES[note.color]}`}
@@ -168,29 +240,52 @@ function StickyNoteCard({
         }}
         placeholder="내용을 입력하세요…"
         aria-label="스티커 메모 내용"
-        className="min-h-[80px] cursor-text resize-none bg-transparent text-sm text-neutral-800 outline-none"
+        className="min-h-0 flex-1 cursor-text resize-none bg-transparent text-sm text-neutral-800 outline-none"
       />
-      <div className="flex gap-1">
-        {COLORS.map((color) => (
-          <button
-            key={color}
-            type="button"
-            onClick={() => onSetColor(color)}
-            aria-label={`${COLOR_LABELS[color]}으로 변경`}
-            aria-pressed={note.color === color}
-            className={`h-4 w-4 rounded-full ${COLOR_SWATCH_CLASSES[color]} ${
-              note.color === color ? "ring-2 ring-offset-1 ring-neutral-500" : ""
-            }`}
-          />
-        ))}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1">
+          {COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              onClick={() => onSetColor(color)}
+              aria-label={`${COLOR_LABELS[color]}으로 변경`}
+              aria-pressed={note.color === color}
+              className={`h-4 w-4 rounded-full ${COLOR_SWATCH_CLASSES[color]} ${
+                note.color === color ? "ring-2 ring-offset-1 ring-neutral-500" : ""
+              }`}
+            />
+          ))}
+        </div>
+        <div
+          data-resize-handle
+          data-testid={`sticky-note-resize-${note.id}`}
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          aria-label="크기 조절"
+          title="크기 조절"
+          className="h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-sm border-b-2 border-r-2 border-neutral-400/60"
+        />
       </div>
     </div>
   );
 }
 
 export function StickyNotesView() {
-  const { stickyNotes, loading, error, create, saveContent, togglePinned, setColor, updatePosition, remove } =
-    useStickyNotes();
+  const {
+    stickyNotes,
+    loading,
+    error,
+    create,
+    saveContent,
+    togglePinned,
+    setColor,
+    updatePosition,
+    updateSize,
+    remove,
+  } = useStickyNotes();
   const { width: viewportWidth, height: viewportHeight } = useViewportSize();
 
   // A lightweight client-side stacking order: the most recently
@@ -222,6 +317,7 @@ export function StickyNotesView() {
                 onSetColor={(color) => setColor(note.id, color)}
                 onDelete={() => remove(note.id)}
                 onPositionCommit={(x, y) => updatePosition(note.id, x, y)}
+                onSizeCommit={(width, height) => updateSize(note.id, width, height)}
               />
             ))}
           </div>,
