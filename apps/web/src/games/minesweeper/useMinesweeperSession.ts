@@ -170,5 +170,10 @@ export function useMinesweeperSession(playerId: string | null) {
     setView(readView("idle", null));
   }, [session, readView]);
 
-  return { ...view, starting, elapsedMs, setDifficulty, start, reveal, toggleFlag, reset };
+  // `difficulty` is returned from the top-level state directly, not from
+  // `view` — `view` only updates when sync() runs (after a session
+  // lifecycle change), but setDifficulty() must be reflected immediately
+  // on click, before any session event fires, so the selector highlight
+  // never lags behind the actual active difficulty.
+  return { ...view, starting, elapsedMs, difficulty, setDifficulty, start, reveal, toggleFlag, reset };
 }
