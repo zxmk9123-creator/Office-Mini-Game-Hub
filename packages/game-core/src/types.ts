@@ -3,6 +3,17 @@ import type { ScoreType } from "@mini-game-hub/shared";
 export type { ScoreType };
 
 /**
+ * How a game's leaderboard periods reset:
+ * - "allTime": every eligible result ever submitted stays ranked forever
+ *   (the platform default — most games).
+ * - "daily": only results from the current Asia/Seoul (KST, UTC+9) calendar
+ *   date are ranked; a new day starts a fresh leaderboard automatically,
+ *   with no cron job or physical deletion involved (see rankingDate on the
+ *   server's game_results table and RankingService/GameResultService).
+ */
+export type RankingPeriod = "allTime" | "daily";
+
+/**
  * Static, platform-visible description of a game. Adding a game must only
  * ever mean adding one of these plus a Game implementation — never editing
  * platform code.
@@ -18,6 +29,8 @@ export interface GameMetadata {
   /** Semver-ish string; bump when a game's result shape changes. */
   version: string;
   enabled: boolean;
+  /** Defaults to "allTime" when omitted — existing games need no change. */
+  rankingPeriod?: RankingPeriod;
 }
 
 /** The platform-level lifecycle every game session moves through. */

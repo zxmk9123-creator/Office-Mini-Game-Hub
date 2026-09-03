@@ -1,6 +1,7 @@
 import type { GameRegistry } from "@mini-game-hub/game-core";
 import type { RankingEntryRecord, RankingRepository } from "../repositories/rankingRepository";
 import { GameDisabledError } from "./gameSessionService";
+import { kstDateString } from "../utils/kstDate";
 
 export interface RankingQuery {
   gameId: string;
@@ -33,6 +34,8 @@ export class RankingService {
   constructor(
     private readonly rankingRepository: RankingRepository,
     private readonly gameRegistry: GameRegistry,
+    /** Injectable for tests; defaults to real wall-clock time. */
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   async getRanking(query: RankingQuery): Promise<RankingResult> {
@@ -42,11 +45,21 @@ export class RankingService {
       throw new GameDisabledError(query.gameId);
     }
 
+    // A "daily" rankingPeriod game (e.g. Swipe Brick Breaker) is only ever
+    // ranked against today's Asia/Seoul (KST) date — this is the one place
+    // that date is computed for reads, always from the current instant, so
+    // the leaderboard/personal-rank page a request sees always reflects
+    // "today" at the moment it's asked, with no cron/job needed to roll it
+    // over at the 00:00 KST boundary. Every "allTime" game passes `null`
+    // here and its ranking is completely unaffected.
+    const rankingDate = (game.metadata.rankingPeriod ?? "allTime") === "daily" ? kstDateString(this.now()) : null;
+
     const { entries, total } = await this.rankingRepository.getLeaderboard(
       query.gameId,
       game.metadata.scoreType,
       query.limit,
       query.offset,
+      rankingDate,
     );
 
     const result: RankingResult = {
@@ -60,6 +73,7 @@ export class RankingService {
         query.gameId,
         game.metadata.scoreType,
         query.playerId,
+        rankingDate,
       );
     }
 

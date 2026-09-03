@@ -8,6 +8,8 @@ export interface GameResultRecord {
   gameId: string;
   score: number | null;
   metadata: unknown;
+  /** "YYYY-MM-DD" in Asia/Seoul (KST) for a "daily" rankingPeriod game; null for every "allTime" game. */
+  rankingDate: string | null;
   createdAt: Date;
 }
 
@@ -17,6 +19,8 @@ export interface CreateGameResultInput {
   gameId: string;
   score: number | null;
   metadata: unknown;
+  /** Omit (or pass null) for an "allTime" game — see GameResultRecord.rankingDate. */
+  rankingDate?: string | null;
 }
 
 export interface GameResultRepository {
@@ -36,6 +40,7 @@ export class DrizzleGameResultRepository implements GameResultRepository {
         gameId: input.gameId,
         score: input.score,
         metadata: input.metadata as object,
+        rankingDate: input.rankingDate ?? null,
       })
       .returning();
     return row as GameResultRecord;

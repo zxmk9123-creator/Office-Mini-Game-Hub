@@ -6,6 +6,7 @@ export type {
   GameCompletionReason,
   GameResult,
   ScoreType,
+  RankingPeriod,
 } from "./types";
 export { GAME_LIFECYCLE_STATES } from "./types";
 

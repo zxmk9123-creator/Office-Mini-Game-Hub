@@ -34,6 +34,9 @@ export const swipeBrickBreakerMetadata: GameMetadata = {
   scoreType: "higher_is_better",
   version: "1.0.0",
   enabled: true,
+  // Leaderboard resets automatically every Asia/Seoul (KST) calendar day —
+  // no cron/job or deletion required, see RankingPeriod.
+  rankingPeriod: "daily",
 };
 
 const LAUNCH_X = BOARD_WIDTH / 2;

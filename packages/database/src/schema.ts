@@ -108,6 +108,16 @@ export const gameResults = pgTable(
     // floats (376.09999999403954), not integers.
     score: doublePrecision("score"),
     metadata: jsonb("metadata").notNull().default({}),
+    // Only set for games with GameMetadata.rankingPeriod === "daily" (e.g.
+    // Swipe Brick Breaker) — the Asia/Seoul (KST, UTC+9) calendar date this
+    // result belongs to, as "YYYY-MM-DD", computed server-side at insert
+    // time regardless of server-local timezone (see apps/server's
+    // kstDateString). null for every "allTime" game (the platform
+    // default) — the ranking query only filters on this column when it is
+    // non-null, so other games' rankings are completely unaffected. A new
+    // KST day simply means new rows get a new value here; nothing is ever
+    // deleted, and no scheduled job is required.
+    rankingDate: text("ranking_date"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -115,5 +125,10 @@ export const gameResults = pgTable(
     // before reducing to best-per-player) — this is the one access pattern
     // that justifies an index here.
     index("game_results_game_id_idx").on(table.gameId),
+    // Daily-ranking games (see rankingDate above) always filter by both
+    // game_id and ranking_date together — this composite index serves that
+    // exact access pattern without slowing down all-time games, which never
+    // filter on ranking_date at all.
+    index("game_results_game_id_ranking_date_idx").on(table.gameId, table.rankingDate),
   ],
 );

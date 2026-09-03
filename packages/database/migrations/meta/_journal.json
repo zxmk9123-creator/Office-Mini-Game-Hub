@@ -64,6 +64,13 @@
       "when": 1788326359510,
       "tag": "0008_slow_puck",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788398456243,
+      "tag": "0009_bizarre_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

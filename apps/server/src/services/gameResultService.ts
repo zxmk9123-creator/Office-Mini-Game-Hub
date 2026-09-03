@@ -12,6 +12,7 @@ import {
   type GameSessionStatus,
 } from "../repositories/gameSessionRepository";
 import { GameDisabledError, SessionNotFoundError } from "./gameSessionService";
+import { kstDateString } from "../utils/kstDate";
 
 export class SessionGameMismatchError extends Error {
   constructor(
@@ -79,6 +80,8 @@ export class GameResultService {
     private readonly makeResultRepository: (
       executor: DbClient,
     ) => GameResultRepository = (executor) => new DrizzleGameResultRepository(executor),
+    /** Injectable for tests; defaults to real wall-clock time. */
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   async submitResult(gameId: string, input: SubmitResultInput): Promise<GameResultRecord> {
@@ -116,6 +119,14 @@ export class GameResultService {
           throw new SessionNotEligibleError(input.sessionId, session.status);
         }
 
+        // Only a "daily" rankingPeriod game (e.g. Swipe Brick Breaker) gets
+        // a rankingDate at all — every "allTime" game keeps storing null
+        // here, exactly as before, so their rankings are untouched. The
+        // date itself is always computed in Asia/Seoul (KST), independent
+        // of server-local timezone — see kstDateString.
+        const rankingDate =
+          (game.metadata.rankingPeriod ?? "allTime") === "daily" ? kstDateString(this.now()) : null;
+
         // playerId and gameId come from the session, never from the request body.
         const created = await resultRepository.create({
           sessionId: input.sessionId,
@@ -123,6 +134,7 @@ export class GameResultService {
           gameId: session.gameId,
           score: input.score,
           metadata: input.metadata,
+          rankingDate,
         });
 
         const terminalStatus = TERMINAL_STATUS_BY_COMPLETION_REASON[input.completion.reason];

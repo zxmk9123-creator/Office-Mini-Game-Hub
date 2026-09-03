@@ -17,6 +17,7 @@ import {
 } from "../services/gameResultService";
 import { SessionNotFoundError } from "../services/gameSessionService";
 import { ensureGamesSynced, resetTestData } from "./testDb";
+import { kstDateString } from "../utils/kstDate";
 
 /**
  * A second, real, *enabled* game — distinct from both reaction-test and
@@ -320,5 +321,67 @@ describe("GameResultService.submitResult: transaction integrity", () => {
     // The session must still be "started".
     const reloaded = await sessionService.getSession(session.id);
     expect(reloaded.status).toBe("started");
+  });
+});
+
+describe("GameResultService.submitResult: rankingDate (daily ranking reset, KST)", () => {
+  it("stores null rankingDate for an all-time game (reaction-test)", async () => {
+    const { session } = await createStartedSession();
+    const result = await resultService.submitResult("reaction-test", validCompletedInput(session.id));
+    expect(result.rankingDate).toBeNull();
+  });
+
+  it("stores today's Asia/Seoul (KST) date for a daily rankingPeriod game (swipe-brick-breaker)", async () => {
+    // 2026-06-15T06:00:00Z == 2026-06-15 15:00:00 KST.
+    const fixedNow = new Date("2026-06-15T06:00:00.000Z");
+    const dailyResultService = new GameResultService(
+      db,
+      gameRegistry,
+      undefined,
+      undefined,
+      () => fixedNow,
+    );
+
+    const player = await playerService.createPlayer("KstPlayer");
+    const session = await sessionService.createSession(player.id, "swipe-brick-breaker");
+    const result = await dailyResultService.submitResult("swipe-brick-breaker", {
+      sessionId: session.id,
+      score: 5,
+      completion: { reason: "completed", completedAt: 1000 },
+      metadata: { level: 5, bricksDestroyed: 3, redBonusBallsCollected: 0 },
+    });
+
+    expect(result.rankingDate).toBe(kstDateString(fixedNow));
+    expect(result.rankingDate).toBe("2026-06-15");
+  });
+
+  it("00:00 KST -> new date: a submission just after vs just before the KST boundary gets a different rankingDate", async () => {
+    // 2026-06-15T14:59:59Z == 2026-06-15 23:59:59 KST (still the 15th).
+    const justBeforeMidnightKst = new Date("2026-06-15T14:59:59.000Z");
+    // 2026-06-15T15:00:00Z == 2026-06-16 00:00:00 KST (the 16th begins).
+    const justAfterMidnightKst = new Date("2026-06-15T15:00:00.000Z");
+
+    const beforeService = new GameResultService(db, gameRegistry, undefined, undefined, () => justBeforeMidnightKst);
+    const afterService = new GameResultService(db, gameRegistry, undefined, undefined, () => justAfterMidnightKst);
+
+    const player = await playerService.createPlayer("BoundaryPlayer");
+    const sessionBefore = await sessionService.createSession(player.id, "swipe-brick-breaker");
+    const sessionAfter = await sessionService.createSession(player.id, "swipe-brick-breaker");
+
+    const resultBefore = await beforeService.submitResult("swipe-brick-breaker", {
+      sessionId: sessionBefore.id,
+      score: 1,
+      completion: { reason: "completed", completedAt: 1000 },
+      metadata: { level: 1, bricksDestroyed: 0, redBonusBallsCollected: 0 },
+    });
+    const resultAfter = await afterService.submitResult("swipe-brick-breaker", {
+      sessionId: sessionAfter.id,
+      score: 2,
+      completion: { reason: "completed", completedAt: 2000 },
+      metadata: { level: 2, bricksDestroyed: 0, redBonusBallsCollected: 0 },
+    });
+
+    expect(resultBefore.rankingDate).toBe("2026-06-15");
+    expect(resultAfter.rankingDate).toBe("2026-06-16");
   });
 });

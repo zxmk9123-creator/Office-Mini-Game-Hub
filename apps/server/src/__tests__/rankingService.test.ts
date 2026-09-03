@@ -96,6 +96,8 @@ async function seedResult(options: {
   score: number | null;
   completedAt: Date;
   createResultRow?: boolean;
+  /** Only meaningful for a "daily" rankingPeriod game (e.g. swipe-brick-breaker); omit for an "allTime" game. */
+  rankingDate?: string | null;
 }) {
   const session = await sessionRepository.create({ playerId: options.playerId, gameId: options.gameId });
   await sessionRepository.updateStatus(session.id, options.status as Exclude<typeof options.status, "started">, options.completedAt);
@@ -106,6 +108,7 @@ async function seedResult(options: {
       gameId: options.gameId,
       score: options.score,
       metadata: {},
+      rankingDate: options.rankingDate ?? null,
     });
   }
   return session;
@@ -321,5 +324,204 @@ describe("RankingService.getRanking: future-game extension", () => {
     expect(result.entries).toHaveLength(2);
     expect(result.entries[0]).toMatchObject({ rank: 1, nickname: "Alice", score: 95 });
     expect(result.entries[1]).toMatchObject({ rank: 2, nickname: "Bob", score: 60 });
+  });
+});
+
+/**
+ * Daily ranking reset (GameMetadata.rankingPeriod === "daily"), exercised
+ * against the real registered swipe-brick-breaker game rather than a test
+ * double, since this is a property of its actual metadata. A RankingService
+ * pinned to a fixed "now" makes "today" deterministic in these tests
+ * without depending on the real wall clock or the test runner's timezone.
+ */
+describe("RankingService.getRanking: daily ranking reset (KST)", () => {
+  // 2026-06-15T06:00:00Z is 2026-06-15 15:00:00 KST — safely mid-day KST,
+  // not near the 00:00 KST boundary, so this doubles as "now" for the
+  // service under test.
+  const TODAY_KST_NOON_UTC = new Date("2026-06-15T06:00:00.000Z");
+  const dailyRankingService = new RankingService(rankingRepository, gameRegistry, () => TODAY_KST_NOON_UTC);
+
+  it("same KST day -> same ranking period: two results submitted at different times on the same KST date rank together", async () => {
+    const a = await player("Alice");
+    const b = await player("Bob");
+    // Both fall on 2026-06-15 KST (00:00:30 KST and 23:59:30 KST respectively).
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 5,
+      completedAt: new Date("2026-06-14T15:00:30.000Z"),
+      rankingDate: "2026-06-15",
+    });
+    await seedResult({
+      playerId: b.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 8,
+      completedAt: new Date("2026-06-15T14:59:30.000Z"),
+      rankingDate: "2026-06-15",
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "swipe-brick-breaker", limit: 20, offset: 0 });
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries.map((e) => e.nickname)).toEqual(["Bob", "Alice"]);
+  });
+
+  it("yesterday's records are excluded from today's Top 10", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 999,
+      completedAt: new Date("2026-06-14T10:00:00.000Z"),
+      rankingDate: "2026-06-14",
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "swipe-brick-breaker", limit: 20, offset: 0 });
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.pagination.total).toBe(0);
+  });
+
+  it("only today's (2026-06-15) rows are ranked when yesterday's and today's both exist", async () => {
+    const a = await player("Alice");
+    const b = await player("Bob");
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 999,
+      completedAt: new Date("2026-06-14T10:00:00.000Z"),
+      rankingDate: "2026-06-14",
+    });
+    await seedResult({
+      playerId: b.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 3,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "swipe-brick-breaker", limit: 20, offset: 0 });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({ nickname: "Bob", score: 3 });
+  });
+
+  it("a player's best score is evaluated within the current KST day only — a huge score from yesterday never wins over a smaller one today", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 1000,
+      completedAt: new Date("2026-06-14T10:00:00.000Z"),
+      rankingDate: "2026-06-14",
+    });
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 4,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+
+    const result = await dailyRankingService.getRanking({
+      gameId: "swipe-brick-breaker",
+      limit: 20,
+      offset: 0,
+      playerId: a.id,
+    });
+
+    // Alice's only eligible-today result is 4 — the 1000 from yesterday is
+    // excluded entirely, not merely out-ranked.
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].score).toBe(4);
+    expect(result.playerRank).toMatchObject({ score: 4 });
+  });
+
+  it("the same player can start a fresh daily record on the next KST day: yesterday's result does not block or get overwritten by today's", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 7,
+      completedAt: new Date("2026-06-14T10:00:00.000Z"),
+      rankingDate: "2026-06-14",
+    });
+
+    // "Today" (2026-06-15) ranking has no result for Alice yet — first
+    // score after midnight starts a fresh daily record.
+    const beforeFirstScoreToday = await dailyRankingService.getRanking({
+      gameId: "swipe-brick-breaker",
+      limit: 20,
+      offset: 0,
+      playerId: a.id,
+    });
+    expect(beforeFirstScoreToday.playerRank).toBeNull();
+
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 2,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+
+    const afterFirstScoreToday = await dailyRankingService.getRanking({
+      gameId: "swipe-brick-breaker",
+      limit: 20,
+      offset: 0,
+      playerId: a.id,
+    });
+    expect(afterFirstScoreToday.playerRank).toMatchObject({ score: 2 });
+  });
+
+  it("00:00 KST -> new date: a result stored under tomorrow's KST date is invisible to today's ranking", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "swipe-brick-breaker",
+      status: "completed",
+      score: 6,
+      // Stored as tomorrow's KST date (as if it had been submitted just
+      // after the 00:00 KST rollover on 2026-06-16).
+      completedAt: new Date("2026-06-15T15:00:01.000Z"),
+      rankingDate: "2026-06-16",
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "swipe-brick-breaker", limit: 20, offset: 0 });
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it("does not affect an all-time (non-daily) game's ranking: reaction-test still ranks across dates unfiltered", async () => {
+    const a = await player("Alice");
+    const b = await player("Bob");
+    await seedResult({
+      playerId: a.id,
+      gameId: "reaction-test",
+      status: "completed",
+      score: 300,
+      completedAt: new Date("2026-06-14T10:00:00.000Z"),
+    });
+    await seedResult({
+      playerId: b.id,
+      gameId: "reaction-test",
+      status: "completed",
+      score: 200,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+    });
+
+    // Same fixed-"now" service, but reaction-test is "allTime" — both
+    // results (from two different KST dates) must still appear.
+    const result = await dailyRankingService.getRanking({ gameId: "reaction-test", limit: 20, offset: 0 });
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries.map((e) => e.nickname)).toEqual(["Bob", "Alice"]);
   });
 });
