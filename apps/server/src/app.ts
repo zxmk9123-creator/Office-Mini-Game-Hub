@@ -19,6 +19,7 @@ import { createResultsRouter } from "./routes/results";
 import { createRankingRouter } from "./routes/ranking";
 import { createNotesRouter } from "./routes/notes";
 import { createStickyNotesRouter } from "./routes/stickyNotes";
+import { createDebugRouter } from "./routes/debug";
 import { errorHandler } from "./errorHandler";
 import { resolveCorsOrigins } from "./cors";
 
@@ -50,6 +51,9 @@ export function createApp(): Express {
   app.use("/api", createRankingRouter(rankingService));
   app.use("/api", createNotesRouter(noteService));
   app.use("/api", createStickyNotesRouter(stickyNoteService));
+  // TEMPORARY — see routes/debug.ts; remove once the daily-ranking
+  // investigation is done.
+  app.use("/api", createDebugRouter(db));
 
   app.use(errorHandler);
 
