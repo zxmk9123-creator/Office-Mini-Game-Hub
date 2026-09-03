@@ -23,7 +23,7 @@ export interface MinesweeperDifficultyConfig {
 
 /** Width x height x mine count per difficulty — also drives each difficulty's separate ranking category (see minesweeper.ts's per-difficulty GameMetadata). */
 export const MINESWEEPER_DIFFICULTIES = {
-  easy: { width: 10, height: 8, mines: 12 },
+  easy: { width: 10, height: 6, mines: 12 },
   normal: { width: 14, height: 9, mines: 25 },
   hard: { width: 18, height: 10, mines: 45 },
 } as const satisfies Record<string, MinesweeperDifficultyConfig>;
