@@ -6,6 +6,7 @@
 const GAMES = [
   { id: "reaction-test", name: "Reaction Test", description: "How fast are you?" },
   { id: "swipe-brick-breaker", name: "Swipe Brick Breaker", description: "Drag to aim, release to fire." },
+  { id: "minesweeper", name: "Minesweeper", description: "Clear the board as fast as you can." },
 ] as const;
 
 export function ToolsList({

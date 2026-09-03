@@ -7,9 +7,10 @@ import { NicknameEntry } from "./player/NicknameEntry";
 import { usePlayerSession } from "./player/usePlayerSession";
 import { ReactionTestView } from "./games/reaction-test/ReactionTestView";
 import { SwipeBrickBreakerView } from "./games/swipe-brick-breaker/SwipeBrickBreakerView";
+import { MinesweeperView } from "./games/minesweeper/MinesweeperView";
 
 type Section = "notes" | "sticky-notes" | "tools";
-type ToolScreen = "list" | "reaction-test" | "swipe-brick-breaker";
+type ToolScreen = "list" | "reaction-test" | "swipe-brick-breaker" | "minesweeper";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "notes", label: "메모" },
@@ -62,6 +63,14 @@ export default function App() {
     } else if (toolScreen === "reaction-test") {
       body = (
         <ReactionTestView
+          playerId={session.playerId}
+          nickname={session.nickname}
+          onHome={() => setToolScreen("list")}
+        />
+      );
+    } else if (toolScreen === "minesweeper") {
+      body = (
+        <MinesweeperView
           playerId={session.playerId}
           nickname={session.nickname}
           onHome={() => setToolScreen("list")}

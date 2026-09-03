@@ -88,3 +88,27 @@ export {
   type SwipeBrickBreakerInput,
   type SwipeBrickBreakerResultMetadata,
 } from "./games/swipe-brick-breaker";
+
+export {
+  MinesweeperGame,
+  MinesweeperInputError,
+  minesweeperMetadataFor,
+  minesweeperEasyMetadata,
+  minesweeperNormalMetadata,
+  minesweeperHardMetadata,
+  createEmptyBoard,
+  neighborsOf,
+  placeMines,
+  revealCascade,
+  MINESWEEPER_DIFFICULTIES,
+  MathRandomSource as MinesweeperMathRandomSource,
+  type RandomSource as MinesweeperRandomSource,
+  type MinesweeperDifficulty,
+  type MinesweeperDifficultyConfig,
+  type CellState as MinesweeperCellState,
+  type Cell as MinesweeperCell,
+  type MinesweeperPhase,
+  type MinesweeperState,
+  type MinesweeperInput,
+  type MinesweeperResultMetadata,
+} from "./games/minesweeper";

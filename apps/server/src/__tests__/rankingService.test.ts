@@ -525,3 +525,91 @@ describe("RankingService.getRanking: daily ranking reset (KST)", () => {
     expect(result.entries.map((e) => e.nickname)).toEqual(["Bob", "Alice"]);
   });
 });
+
+describe("RankingService.getRanking: Minesweeper — per-difficulty ranking + KST daily isolation", () => {
+  const TODAY_KST_NOON_UTC = new Date("2026-06-15T06:00:00.000Z");
+  const dailyRankingService = new RankingService(rankingRepository, gameRegistry, () => TODAY_KST_NOON_UTC);
+
+  it("minesweeper-easy and minesweeper-normal rank completely separately, even for the same player/day", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "minesweeper-easy",
+      status: "completed",
+      score: 45000,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+    await seedResult({
+      playerId: a.id,
+      gameId: "minesweeper-normal",
+      status: "completed",
+      score: 120000,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+
+    const easy = await dailyRankingService.getRanking({ gameId: "minesweeper-easy", limit: 20, offset: 0 });
+    const normal = await dailyRankingService.getRanking({ gameId: "minesweeper-normal", limit: 20, offset: 0 });
+
+    expect(easy.entries).toHaveLength(1);
+    expect(easy.entries[0].score).toBe(45000);
+    expect(normal.entries).toHaveLength(1);
+    expect(normal.entries[0].score).toBe(120000);
+  });
+
+  it("yesterday's minesweeper-hard clear is excluded from today's Top 10 (KST)", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "minesweeper-hard",
+      status: "completed",
+      score: 60000,
+      completedAt: new Date("2026-06-14T10:00:00.000Z"),
+      rankingDate: "2026-06-14",
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "minesweeper-hard", limit: 20, offset: 0 });
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it("a lower clear time ranks higher (rank 1) than a higher one on the same KST day", async () => {
+    const a = await player("Alice");
+    const b = await player("Bob");
+    await seedResult({
+      playerId: a.id,
+      gameId: "minesweeper-easy",
+      status: "completed",
+      score: 30000,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+    await seedResult({
+      playerId: b.id,
+      gameId: "minesweeper-easy",
+      status: "completed",
+      score: 15000,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: "2026-06-15",
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "minesweeper-easy", limit: 20, offset: 0 });
+    expect(result.entries.map((e) => e.nickname)).toEqual(["Bob", "Alice"]);
+    expect(result.entries.map((e) => e.score)).toEqual([15000, 30000]);
+  });
+
+  it("a failed (Game Over) attempt — null score, invalid session status — never appears in the ranking", async () => {
+    const a = await player("Alice");
+    await seedResult({
+      playerId: a.id,
+      gameId: "minesweeper-easy",
+      status: "invalid",
+      score: null,
+      completedAt: new Date("2026-06-15T06:00:00.000Z"),
+      rankingDate: null,
+    });
+
+    const result = await dailyRankingService.getRanking({ gameId: "minesweeper-easy", limit: 20, offset: 0 });
+    expect(result.entries).toHaveLength(0);
+  });
+});
