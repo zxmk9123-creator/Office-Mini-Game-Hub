@@ -1,5 +1,13 @@
 export { SwipeBrickBreakerGame, SwipeBrickBreakerInputError, swipeBrickBreakerMetadata } from "./swipe-brick-breaker";
-export { generateBricks, generateFormation, brickHpForLevel, newBrickCountForLevel } from "./bricks";
+export {
+  generateBricks,
+  generateFormation,
+  brickHpForLevel,
+  newBrickCountForLevel,
+  difficultyTierForLevel,
+  DIFFICULTY_TIERS,
+  type DifficultyTier,
+} from "./bricks";
 export { stepBalls, type BrickHitEvent, type StepResult } from "./physics";
 export {
   MathRandomSource,

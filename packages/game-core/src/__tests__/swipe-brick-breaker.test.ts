@@ -10,12 +10,14 @@ import {
   SwipeBrickBreakerGame,
   SwipeBrickBreakerInputError,
   brickHpForLevel,
+  difficultyTierForLevel,
   generateBricks,
   generateFormation,
   stepBalls,
   type Ball,
   type Brick,
   type Clock,
+  type DifficultyTier,
   type RandomSource,
 } from "..";
 
@@ -82,6 +84,245 @@ describe("generateBricks", () => {
     for (let level = 1; level < 30; level++) {
       expect(brickHpForLevel(level + 1) - brickHpForLevel(level)).toBe(1);
     }
+  });
+});
+
+describe("difficultyTierForLevel: 30-round tiers", () => {
+  it("maps every round to the correct tier at each boundary", () => {
+    const cases: [number, DifficultyTier][] = [
+      [1, "normal"],
+      [30, "normal"],
+      [31, "dense"],
+      [60, "dense"],
+      [61, "hard"],
+      [90, "hard"],
+      [91, "expert"],
+      [120, "expert"],
+      [121, "extreme"],
+      [500, "extreme"],
+    ];
+    for (const [level, expected] of cases) {
+      expect(difficultyTierForLevel(level)).toBe(expected);
+    }
+  });
+});
+
+describe("generateBricks: progressive difficulty by tier", () => {
+  /** Many distinct deterministic seeds, reused across every assertion below. */
+  const seeds = Array.from({ length: 40 }, (_, i) => [
+    ((i * 37 + 1) % 101) / 101,
+    ((i * 53 + 7) % 97) / 97,
+    ((i * 19 + 3) % 89) / 89,
+    ((i * 71 + 11) % 83) / 83,
+    ((i * 29 + 5) % 79) / 79,
+    ((i * 43 + 13) % 73) / 73,
+  ]);
+
+  function allBricksAcrossSeeds(level: number): Brick[][] {
+    return seeds.map((seed) => generateBricks(level, new SequenceRandomSource(seed)));
+  }
+
+  describe("rounds 1-30 (NORMAL): unchanged behavior", () => {
+    it("still generates 1-5 bricks, fully random placement, and never a reinforced brick", () => {
+      for (const level of [1, 5, 15, 29, 30]) {
+        for (const bricks of allBricksAcrossSeeds(level)) {
+          expect(bricks.length).toBeGreaterThanOrEqual(1);
+          expect(bricks.length).toBeLessThanOrEqual(5);
+          for (const b of bricks) {
+            // No reinforced bricks at this tier: every brick's HP is
+            // exactly the plain round-based value, never level + 2.
+            expect(b.hp).toBe(brickHpForLevel(level));
+            expect(b.maxHp).toBe(brickHpForLevel(level));
+          }
+        }
+      }
+    });
+
+    it("produces the exact same output as the pre-tier algorithm for the same seed (byte-for-byte)", () => {
+      // Reimplements the original (pre-tier) generateBricks algorithm
+      // inline, to prove the NORMAL-tier path wasn't altered at all.
+      function originalGenerateBricks(level: number, random: RandomSource): Brick[] {
+        const cap = Math.min(MAX_NEW_BRICKS_PER_TURN, 2 + Math.floor(Math.max(0, level - 1) / 5));
+        const count = Math.min(BOARD_COLS, 1 + Math.floor(random.next() * cap));
+        const hp = brickHpForLevel(level);
+        const availableCols = Array.from({ length: BOARD_COLS }, (_, i) => i);
+        const chosenCols: number[] = [];
+        for (let i = 0; i < count && availableCols.length > 0; i++) {
+          const pickIndex = Math.floor(random.next() * availableCols.length);
+          chosenCols.push(availableCols.splice(pickIndex, 1)[0]);
+        }
+        return chosenCols.map((col) => ({ row: FORMATION_TOP_ROW, col, hp, maxHp: hp }));
+      }
+
+      for (const level of [1, 7, 16, 25, 30]) {
+        for (const seed of seeds) {
+          expect(generateBricks(level, new SequenceRandomSource(seed))).toEqual(
+            originalGenerateBricks(level, new SequenceRandomSource(seed)),
+          );
+        }
+      }
+    });
+  });
+
+  describe("rounds 31-60 (DENSE)", () => {
+    it("generates exactly 3-5 bricks, never reinforced", () => {
+      for (const level of [31, 45, 60]) {
+        for (const bricks of allBricksAcrossSeeds(level)) {
+          expect(bricks.length).toBeGreaterThanOrEqual(3);
+          expect(bricks.length).toBeLessThanOrEqual(5);
+          for (const b of bricks) {
+            expect(b.hp).toBe(brickHpForLevel(level));
+          }
+        }
+      }
+    });
+
+    it("clusters more around the center column than NORMAL's uniform placement does", () => {
+      const center = (BOARD_COLS - 1) / 2;
+      const meanDistance = (level: number) => {
+        const all = allBricksAcrossSeeds(level).flat();
+        return all.reduce((sum, b) => sum + Math.abs(b.col - center), 0) / all.length;
+      };
+      // Sampling the same seeds at a NORMAL-tier level (uniform) vs a
+      // DENSE-tier level (center-biased) — the biased mean distance from
+      // center must be smaller.
+      expect(meanDistance(45)).toBeLessThan(meanDistance(15));
+    });
+  });
+
+  describe("rounds 61-90 (HARD)", () => {
+    it("generates exactly 4-5 bricks, with roughly a 20% reinforced proportion (HP = round + 2)", () => {
+      const level = 75;
+      const all = allBricksAcrossSeeds(level).flatMap((bricks) => {
+        expect(bricks.length).toBeGreaterThanOrEqual(4);
+        expect(bricks.length).toBeLessThanOrEqual(5);
+        return bricks;
+      });
+      const reinforced = all.filter((b) => b.hp === level + 2);
+      const normal = all.filter((b) => b.hp === brickHpForLevel(level));
+      expect(reinforced.length + normal.length).toBe(all.length);
+      const proportion = reinforced.length / all.length;
+      expect(proportion).toBeGreaterThan(0.05);
+      expect(proportion).toBeLessThan(0.4);
+    });
+
+    it("is biased away from the center (more 'inconvenient') than DENSE's center bias", () => {
+      const center = (BOARD_COLS - 1) / 2;
+      const meanDistance = (level: number) => {
+        const all = allBricksAcrossSeeds(level).flat();
+        return all.reduce((sum, b) => sum + Math.abs(b.col - center), 0) / all.length;
+      };
+      expect(meanDistance(75)).toBeGreaterThan(meanDistance(45));
+    });
+  });
+
+  describe("rounds 91-120 (EXPERT)", () => {
+    it("generates exactly 5 bricks every time, with roughly a 30% reinforced proportion", () => {
+      const level = 105;
+      const all = allBricksAcrossSeeds(level).flatMap((bricks) => {
+        expect(bricks.length).toBe(5);
+        return bricks;
+      });
+      const reinforced = all.filter((b) => b.hp === level + 2);
+      const proportion = reinforced.length / all.length;
+      expect(proportion).toBeGreaterThan(0.15);
+      expect(proportion).toBeLessThan(0.5);
+    });
+
+    it("concentrates bricks into a tighter span of columns than HARD's edge-scattered layout", () => {
+      const spanOf = (level: number) => {
+        // Average per-seed column span (max - min) — a tighter corridor
+        // means a smaller span on average.
+        const spans = seeds.map((seed) => {
+          const bricks = generateBricks(level, new SequenceRandomSource(seed));
+          const cols = bricks.map((b) => b.col);
+          return Math.max(...cols) - Math.min(...cols);
+        });
+        return spans.reduce((s, v) => s + v, 0) / spans.length;
+      };
+      expect(spanOf(105)).toBeLessThanOrEqual(spanOf(75));
+    });
+  });
+
+  describe("rounds 121+ (EXTREME)", () => {
+    it("generates exactly 5 bricks every time, with roughly a 40% reinforced proportion", () => {
+      for (const level of [121, 200, 1000]) {
+        const all = allBricksAcrossSeeds(level).flatMap((bricks) => {
+          expect(bricks.length).toBe(5);
+          return bricks;
+        });
+        const reinforced = all.filter((b) => b.hp === level + 2);
+        const proportion = reinforced.length / all.length;
+        expect(proportion).toBeGreaterThan(0.25);
+        expect(proportion).toBeLessThan(0.6);
+      }
+    });
+
+    it("uses at least as narrow a column span as EXPERT (never looser/easier)", () => {
+      const spanOf = (level: number) => {
+        const spans = seeds.map((seed) => {
+          const bricks = generateBricks(level, new SequenceRandomSource(seed));
+          const cols = bricks.map((b) => b.col);
+          return Math.max(...cols) - Math.min(...cols);
+        });
+        return spans.reduce((s, v) => s + v, 0) / spans.length;
+      };
+      expect(spanOf(200)).toBeLessThanOrEqual(spanOf(105));
+    });
+  });
+
+  describe("randomized placement stays active at every tier", () => {
+    it("the same round produces different column layouts across different seeds — never a fixed repeating pattern", () => {
+      for (const level of [10, 45, 75, 105, 200]) {
+        const layouts = seeds
+          .slice(0, 15)
+          .map((seed) => generateBricks(level, new SequenceRandomSource(seed)).map((b) => b.col).join(","));
+        const distinctLayouts = new Set(layouts);
+        expect(distinctLayouts.size).toBeGreaterThan(1);
+      }
+    });
+
+    it("is still deterministic for a repeated identical seed at every tier", () => {
+      for (const level of [10, 45, 75, 105, 200]) {
+        const a = generateBricks(level, new SequenceRandomSource(seeds[0]));
+        const b = generateBricks(level, new SequenceRandomSource(seeds[0]));
+        expect(a).toEqual(b);
+      }
+    });
+  });
+
+  describe("never generates an impossible/unplayable formation, at any tier", () => {
+    it("every round leaves at least 2 open columns (never more than MAX_NEW_BRICKS_PER_TURN bricks), at every difficulty", () => {
+      for (const level of [1, 15, 30, 31, 45, 60, 61, 75, 90, 91, 105, 120, 121, 200, 1000]) {
+        for (const bricks of allBricksAcrossSeeds(level)) {
+          expect(bricks.length).toBeLessThanOrEqual(MAX_NEW_BRICKS_PER_TURN);
+          const openColumns = BOARD_COLS - new Set(bricks.map((b) => b.col)).size;
+          expect(openColumns).toBeGreaterThanOrEqual(BOARD_COLS - MAX_NEW_BRICKS_PER_TURN);
+          expect(openColumns).toBeGreaterThanOrEqual(2);
+        }
+      }
+    });
+
+    it("never places two bricks on the same column, at any tier", () => {
+      for (const level of [1, 45, 75, 105, 200]) {
+        for (const bricks of allBricksAcrossSeeds(level)) {
+          const cols = bricks.map((b) => b.col);
+          expect(new Set(cols).size).toBe(cols.length);
+        }
+      }
+    });
+
+    it("only ever spawns at FORMATION_TOP_ROW, in-bounds, at any tier", () => {
+      for (const level of [1, 45, 75, 105, 200]) {
+        for (const bricks of allBricksAcrossSeeds(level)) {
+          for (const b of bricks) {
+            expect(b.row).toBe(FORMATION_TOP_ROW);
+            expect(b.col).toBeGreaterThanOrEqual(0);
+            expect(b.col).toBeLessThan(BOARD_COLS);
+          }
+        }
+      }
+    });
   });
 });
 
