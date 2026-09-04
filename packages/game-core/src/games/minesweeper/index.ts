@@ -6,7 +6,7 @@ export {
   minesweeperNormalMetadata,
   minesweeperHardMetadata,
 } from "./minesweeper";
-export { createEmptyBoard, neighborsOf, placeMines, revealCascade } from "./board";
+export { createEmptyBoard, neighborsOf, placeMines, revealCascade, safetyZoneOf } from "./board";
 export {
   MathRandomSource,
   MINESWEEPER_DIFFICULTIES,

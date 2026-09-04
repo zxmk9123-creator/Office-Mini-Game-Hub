@@ -100,6 +100,7 @@ export {
   neighborsOf,
   placeMines,
   revealCascade,
+  safetyZoneOf,
   MINESWEEPER_DIFFICULTIES,
   MathRandomSource as MinesweeperMathRandomSource,
   type RandomSource as MinesweeperRandomSource,

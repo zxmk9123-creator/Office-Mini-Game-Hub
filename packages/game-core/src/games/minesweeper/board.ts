@@ -23,12 +23,24 @@ export function neighborsOf(index: number, width: number, height: number): numbe
 }
 
 /**
- * Places `mineCount` mines among every cell except `excludeIndex` (the
- * first-clicked cell, which must always be safe), then computes each
- * non-mine cell's adjacent-mine count. Deterministic given a deterministic
- * `random` — a partial Fisher-Yates over the eligible pool, consuming
- * exactly `mineCount` values from `random.next()` (fewer only if the pool
- * itself is smaller than `mineCount`, which no configured difficulty hits).
+ * `index` itself plus its (up to 8) neighbors — the 3x3 first-click safety
+ * zone, clamped to the board so a corner/edge click still only excludes
+ * the in-bounds cells that actually exist (4 cells for a corner, 6 for an
+ * edge, 9 for anywhere interior).
+ */
+export function safetyZoneOf(index: number, width: number, height: number): number[] {
+  return [index, ...neighborsOf(index, width, height)];
+}
+
+/**
+ * Places `mineCount` mines among every cell outside the 3x3 safety zone
+ * centered on `excludeIndex` (the first-clicked cell) — that whole zone,
+ * not just the clicked cell itself, must always be mine-free — then
+ * computes each non-mine cell's adjacent-mine count. Deterministic given a
+ * deterministic `random` — a partial Fisher-Yates over the eligible pool,
+ * consuming exactly `mineCount` values from `random.next()` (fewer only if
+ * the pool itself is smaller than `mineCount`, which no configured
+ * difficulty hits).
  */
 export function placeMines(
   cells: Cell[],
@@ -38,9 +50,10 @@ export function placeMines(
   excludeIndex: number,
   random: RandomSource,
 ): Cell[] {
+  const safeZone = new Set(safetyZoneOf(excludeIndex, width, height));
   const pool: number[] = [];
   for (let i = 0; i < cells.length; i++) {
-    if (i !== excludeIndex) pool.push(i);
+    if (!safeZone.has(i)) pool.push(i);
   }
 
   const mineIndices = new Set<number>();

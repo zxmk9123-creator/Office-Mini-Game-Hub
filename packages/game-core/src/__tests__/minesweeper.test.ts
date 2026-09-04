@@ -8,6 +8,8 @@ import {
   minesweeperNormalMetadata,
   neighborsOf,
   placeMines,
+  revealCascade,
+  safetyZoneOf,
   createEmptyBoard,
   type Clock,
   type MinesweeperDifficulty,
@@ -99,6 +101,83 @@ describe("Minesweeper: first-click safety", () => {
   });
 });
 
+describe("Minesweeper: 3x3 first-click safety zone (replaces single-cell safety)", () => {
+  /** Corner, edge, and center click positions for a given board size. */
+  function positionsFor(width: number, height: number) {
+    return {
+      corner: { row: 0, col: 0 },
+      edge: { row: 0, col: Math.floor(width / 2) },
+      center: { row: Math.floor(height / 2), col: Math.floor(width / 2) },
+    } as const;
+  }
+
+  for (const difficulty of DIFFICULTIES) {
+    const cfg = MINESWEEPER_DIFFICULTIES[difficulty];
+    const positions = positionsFor(cfg.width, cfg.height);
+
+    for (const [label, pos] of Object.entries(positions)) {
+      it(`${difficulty}: the clicked cell and its whole surrounding 3x3 area are mine-free for a ${label} click`, () => {
+        for (let seed = 0; seed < 10; seed++) {
+          const random = new SequenceRandomSource([((seed * 41) % 101) / 101, ((seed * 19) % 83) / 83, ((seed * 7) % 71) / 71]);
+          const { game, state } = newGame(difficulty, new FixedClock(), random);
+          const revealed = game.handleInput(state, { type: "reveal", row: pos.row, col: pos.col });
+
+          const clickedIndex = pos.row * state.width + pos.col;
+          const zone = safetyZoneOf(clickedIndex, state.width, state.height);
+          // A corner has only 4 cells in its zone, an edge 6, an interior center 9 —
+          // whatever's actually in-bounds must ALL be mine-free.
+          for (const idx of zone) {
+            expect(revealed.cells[idx].mine).toBe(false);
+          }
+          // Mines placed at all must all land strictly outside the zone.
+          const zoneSet = new Set(zone);
+          for (let i = 0; i < revealed.cells.length; i++) {
+            if (revealed.cells[i].mine) {
+              expect(zoneSet.has(i)).toBe(false);
+            }
+          }
+          expect(revealed.cells.filter((c) => c.mine)).toHaveLength(cfg.mines);
+        }
+      });
+    }
+  }
+
+  it("does not force-reveal anything beyond what ordinary cascade rules would — no special-cased whole-zone reveal", () => {
+    // 7x7 board, first click at the center (index 24). Its 3x3 zone
+    // (indices 16,17,18,23,24,25,30,31,32) is mine-free; every one of the
+    // 40 cells outside it is forced to be a mine. The clicked cell's own
+    // adjacent count is 0 (all its neighbors are zone cells, guaranteed
+    // safe) — so ordinary cascade rules alone reveal its neighbors too,
+    // exactly the rest of the zone. That reveal stops there: every zone
+    // cell borders at least one outside mine, so none of them is itself a
+    // 0-adjacent cell that would keep the cascade spreading further.
+    // Nothing here special-cases "reveal the whole zone" — it falls
+    // straight out of normal adjacency-driven flood fill, and it goes no
+    // further than that.
+    const width = 7;
+    const height = 7;
+    const centerIndex = 24; // row 3, col 3
+    const zone = safetyZoneOf(centerIndex, width, height);
+    const zoneSet = new Set(zone);
+    const outsideCount = width * height - zone.length;
+    const cells = placeMines(createEmptyBoard(width, height), width, height, outsideCount, centerIndex, new SequenceRandomSource([0]));
+    expect(cells.filter((c) => c.mine)).toHaveLength(outsideCount);
+    for (const idx of zone) {
+      expect(cells[idx].mine).toBe(false);
+    }
+    expect(cells[centerIndex].adjacent).toBe(0);
+
+    const revealed = revealCascade(cells, width, height, centerIndex);
+    const revealedIndices = revealed.map((c, i) => (c.state === "revealed" ? i : -1)).filter((i) => i >= 0);
+    expect(revealedIndices.sort((a, b) => a - b)).toEqual([...zone].sort((a, b) => a - b));
+    for (let i = 0; i < revealed.length; i++) {
+      if (!zoneSet.has(i)) {
+        expect(revealed[i].state).toBe("hidden");
+      }
+    }
+  });
+});
+
 describe("Minesweeper: adjacent mine counting", () => {
   it("counts exactly the mines among a cell's 8 neighbors, for a real placement", () => {
     const width = 5;
@@ -112,14 +191,24 @@ describe("Minesweeper: adjacent mine counting", () => {
     }
   });
 
-  it("a lone safe cell surrounded by mines on every side reports adjacent === 8", () => {
-    // 3x3 board, safe cell at the center (index 4); every other cell mined.
-    const width = 3;
-    const height = 3;
-    const cells = placeMines(createEmptyBoard(width, height), width, height, 8, 4, new SequenceRandomSource([0]));
-    expect(cells[4].mine).toBe(false);
-    expect(cells[4].adjacent).toBe(8);
-    expect(cells.filter((c) => c.mine)).toHaveLength(8);
+  it("a zone cell still reports a normal, non-zero adjacent count from a mine just outside the zone", () => {
+    // 5x5 board, first click at the center (index 12) — its 3x3 zone is
+    // {6,7,8,11,12,13,16,17,18}, entirely mine-free. With next() always
+    // returning 0, placeMines' Fisher-Yates deterministically picks the
+    // pool's first (ascending) eligible index — index 0, the smallest
+    // index not in the zone — for the single mine.
+    const width = 5;
+    const height = 5;
+    const centerIndex = 12;
+    const cells = placeMines(createEmptyBoard(width, height), width, height, 1, centerIndex, new SequenceRandomSource([0]));
+    expect(cells[0].mine).toBe(true);
+    for (const idx of safetyZoneOf(centerIndex, width, height)) {
+      expect(cells[idx].mine).toBe(false);
+    }
+    // Zone cell 6 (row 1, col 1) has index 0 among its 8 neighbors — its
+    // adjacent count must reflect that outside mine normally, proving
+    // number generation for zone cells is untouched by the safety rule.
+    expect(cells[6].adjacent).toBe(1);
   });
 });
 
