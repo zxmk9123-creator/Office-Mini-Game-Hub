@@ -3,11 +3,12 @@ import type { Clock } from "../reaction-test/types";
 import { canPlace, getDropDistance } from "./collision";
 import { clearCompletedRows, createEmptyBoard, mergePieceIntoBoard } from "./board";
 import { MathRandomSource, SevenBagGenerator, type BagSource } from "./generator";
+import { gravityIntervalMs } from "./gravity";
 import { spawnPiece } from "./pieces";
 import { PieceQueue } from "./queue";
 import { getRotationCandidates, type RotationDirection } from "./rotation";
 import { DEFAULT_TETRIS_RULESET } from "./constants";
-import type { ActivePiece, TetrisInput, TetrisResultMetadata, TetrisState } from "./types";
+import type { ActivePiece, TetrisInput, TetrisResultMetadata, TetrisRuleset, TetrisState } from "./types";
 
 /**
  * Number of upcoming pieces exposed via `state.next` — a display/UI
@@ -17,13 +18,13 @@ import type { ActivePiece, TetrisInput, TetrisResultMetadata, TetrisState } from
 const PREVIEW_COUNT = 3;
 
 /**
- * Phase A-C: spawn, left/right/soft-drop/hard-drop movement, collision,
- * locking, game-over detection, and SRS rotation with wall kicks (see
- * rotation.ts). Scoring, line clearing, level progression, and gravity
- * timing are later phases — `pause`/`restart`/`tick` are accepted (the
- * Game contract must handle every declared TetrisInput) but are no-ops
- * for now, exactly like an unimplemented-yet branch in any other engine's
- * handleInput.
+ * Phase A-E: spawn, left/right/soft-drop/hard-drop movement, collision,
+ * locking, game-over detection, SRS rotation with wall kicks (rotation.ts),
+ * line clearing (board.ts), and time-driven gravity + Classic-style lock
+ * delay (gravity.ts + the "tick" input). Scoring, level progression, and
+ * gravity acceleration by level are later phases — `pause`/`restart` are
+ * accepted (the Game contract must handle every declared TetrisInput) but
+ * remain no-ops for now.
  */
 export const tetrisMetadata: GameMetadata = {
   id: "tetris",
@@ -38,13 +39,15 @@ export const tetrisMetadata: GameMetadata = {
 };
 
 /**
- * Tetris's game engine. Pure state transitions only — no DOM, no timers.
- * `queue` (built fresh from `pieceSource` on every start()) is
- * intentionally NOT part of TetrisState: it's a stateful helper object,
- * not serializable data, the same way SwipeBrickBreakerGame keeps its
- * `bricksDestroyed` counter on the instance rather than in TState. Given
- * the same `pieceSource` sequence and the same input sequence, the
- * resulting TetrisState is always identical.
+ * Tetris's game engine. Pure state transitions only — no DOM, no timers;
+ * time only ever enters via the "tick" input's `dtMs`, supplied by the
+ * caller (see types.ts's TetrisInput doc comment). `queue` (built fresh
+ * from `pieceSource` on every start()) is intentionally NOT part of
+ * TetrisState: it's a stateful helper object, not serializable data, the
+ * same way SwipeBrickBreakerGame keeps its `bricksDestroyed` counter on
+ * the instance rather than in TState. Given the same `pieceSource`
+ * sequence and the same input (including "tick") sequence, the resulting
+ * TetrisState is always identical.
  */
 export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMetadata> {
   readonly metadata = tetrisMetadata;
@@ -53,21 +56,21 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
   constructor(
     private readonly clock: Clock,
     private readonly pieceSource: BagSource = new SevenBagGenerator(new MathRandomSource()),
+    private readonly ruleset: TetrisRuleset = DEFAULT_TETRIS_RULESET,
   ) {}
 
   createInitialState(): TetrisState {
     return {
       status: "ready",
-      board: createEmptyBoard(
-        DEFAULT_TETRIS_RULESET.boardWidth,
-        DEFAULT_TETRIS_RULESET.bufferRows + DEFAULT_TETRIS_RULESET.boardHeight,
-      ),
+      board: createEmptyBoard(this.ruleset.boardWidth, this.ruleset.bufferRows + this.ruleset.boardHeight),
       current: null,
       next: [],
       score: 0,
       lines: 0,
       level: 1,
       gravityAccumulator: 0,
+      lockElapsedMs: 0,
+      lockResetCount: 0,
     };
   }
 
@@ -98,15 +101,42 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
         return this.rotate(state, "cw");
       case "rotateCcw":
         return this.rotate(state, "ccw");
-      // Scoring/level/gravity (Phases D-E) and pause/restart semantics
-      // are all later work — every other input is a deliberate no-op for
-      // now, not a missing case.
+      case "tick":
+        return this.tick(state, input.dtMs);
+      // Level/score progression and pause/restart semantics are all
+      // later work — every other input is a deliberate no-op for now.
       case "pause":
       case "restart":
-      case "tick":
       default:
         return state;
     }
+  }
+
+  /** True once the piece can no longer move down one cell — the lock-delay condition. */
+  private isGrounded(board: TetrisState["board"], piece: ActivePiece): boolean {
+    return !canPlace(board, { ...piece, y: piece.y + 1 });
+  }
+
+  /**
+   * Lock-delay bookkeeping for a successful LEFT/RIGHT/ROTATE move (never
+   * for a downward move — see resetLockDelayForLanding for that): if the
+   * piece isn't grounded at its new position, lock delay is fully
+   * inactive (0/0). If it is grounded, the delay resets to 0 UNLESS the
+   * reset budget (lockDelayMaxResets) is already spent, in which case the
+   * elapsed timer keeps running untouched — this is what prevents a piece
+   * from being stalled in place forever by spamming moves/rotations.
+   */
+  private lockDelayAfterSidewaysOrRotate(
+    state: TetrisState,
+    candidate: ActivePiece,
+  ): Pick<TetrisState, "lockElapsedMs" | "lockResetCount"> {
+    if (!this.isGrounded(state.board, candidate)) {
+      return { lockElapsedMs: 0, lockResetCount: 0 };
+    }
+    if (state.lockResetCount >= this.ruleset.lockDelayMaxResets) {
+      return { lockElapsedMs: state.lockElapsedMs, lockResetCount: state.lockResetCount };
+    }
+    return { lockElapsedMs: 0, lockResetCount: state.lockResetCount + 1 };
   }
 
   private tryMove(state: TetrisState, dx: number, dy: number): TetrisState {
@@ -119,16 +149,18 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
       // writing) and the active piece keeps its exact previous position.
       return state;
     }
-    return { ...state, current: candidate };
+    return { ...state, current: candidate, ...this.lockDelayAfterSidewaysOrRotate(state, candidate) };
   }
 
   /**
    * SRS rotation: try the plain rotated position first, then each wall-
    * kick candidate in the table's priority order, accepting the first one
-   * canPlace() allows. If every candidate collides, the piece's position
-   * AND rotation state are both left completely unchanged — a rejected
-   * rotation is indistinguishable from no input at all. Never touches the
-   * board; only ever reads it via the existing canPlace().
+   * canPlace() allows — unaffected by lock delay: rotation remains
+   * allowed at any point while grounded, exactly like Phase C, and a
+   * successful rotation while grounded resets lock delay the same way a
+   * successful sideways move does. If every candidate collides, the
+   * piece's position AND rotation state are both left completely
+   * unchanged. Never touches the board; only ever reads it via canPlace().
    */
   private rotate(state: TetrisState, direction: RotationDirection): TetrisState {
     if (state.status !== "playing" || !state.current) {
@@ -136,24 +168,34 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
     }
     for (const candidate of getRotationCandidates(state.current, direction)) {
       if (canPlace(state.board, candidate)) {
-        return { ...state, current: candidate };
+        return { ...state, current: candidate, ...this.lockDelayAfterSidewaysOrRotate(state, candidate) };
       }
     }
     return state;
   }
 
+  /**
+   * Soft drop moves the piece down one cell, exactly like a manual gravity
+   * step (see tick()'s own downward-move handling) — a fresh landing, so
+   * lock delay is always fully cleared (0/0), never counted against the
+   * reset budget. If downward movement is blocked, soft drop is now a
+   * no-op: it no longer force-locks the piece the instant it touches the
+   * floor (that was Phase B/C/D's behavior, before lock delay existed) —
+   * the piece simply stays grounded, and only lock delay expiring (via
+   * "tick") or an explicit "hardDrop" actually locks it.
+   */
   private softDrop(state: TetrisState): TetrisState {
     if (state.status !== "playing" || !state.current) {
       return state;
     }
     const candidate: ActivePiece = { ...state.current, y: state.current.y + 1 };
-    if (canPlace(state.board, candidate)) {
-      return { ...state, current: candidate };
+    if (!canPlace(state.board, candidate)) {
+      return state;
     }
-    // Downward movement blocked -> lock exactly where the piece already is.
-    return this.lockAndSpawnNext(state, state.current);
+    return { ...state, current: candidate, gravityAccumulator: 0, lockElapsedMs: 0, lockResetCount: 0 };
   }
 
+  /** Hard drop bypasses lock delay entirely — it computes the full drop distance and locks in the same input, exactly as in Phase B-D. */
   private hardDrop(state: TetrisState): TetrisState {
     if (state.status !== "playing" || !state.current) {
       return state;
@@ -164,17 +206,79 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
   }
 
   /**
+   * Time-driven gravity + lock delay — the only input that ever reads
+   * `dtMs` from the caller; game-core itself never calls a timer. Consumes
+   * as many whole gravity intervals as `dtMs` (plus any carried-over
+   * accumulator) covers, moving the piece down one cell per interval,
+   * deterministically, in a loop rather than only ever handling one step
+   * — so a large `dtMs` (e.g. a dropped frame) still behaves correctly
+   * instead of silently losing elapsed time. Once a downward move is
+   * blocked, remaining accumulated time for this tick is dropped (grounded
+   * pieces don't need to "remember" gravity time — only lock delay matters
+   * once grounded) rather than let the accumulator grow without bound.
+   */
+  private tick(state: TetrisState, dtMs: number): TetrisState {
+    if (state.status !== "playing" || !state.current) {
+      return state;
+    }
+
+    const interval = gravityIntervalMs(this.ruleset, state.level);
+    let current = state.current;
+    let gravityAccumulator = state.gravityAccumulator + dtMs;
+    let lockElapsedMs = state.lockElapsedMs;
+    let lockResetCount = state.lockResetCount;
+    let movedThisTick = false;
+
+    while (gravityAccumulator >= interval) {
+      const candidate: ActivePiece = { ...current, y: current.y + 1 };
+      if (!canPlace(state.board, candidate)) {
+        gravityAccumulator = 0;
+        break;
+      }
+      current = candidate;
+      gravityAccumulator -= interval;
+      lockElapsedMs = 0;
+      lockResetCount = 0;
+      movedThisTick = true;
+    }
+
+    if (this.isGrounded(state.board, current)) {
+      if (!movedThisTick) {
+        // Already grounded before this tick's gravity ran (or never moved) — lock delay keeps counting this tick's full elapsed time.
+        lockElapsedMs += dtMs;
+      }
+      if (lockElapsedMs >= this.ruleset.lockDelayMs) {
+        return this.lockAndSpawnNext({ ...state, current }, current);
+      }
+      return { ...state, current, gravityAccumulator, lockElapsedMs, lockResetCount };
+    }
+
+    // Not grounded: no lock delay in progress.
+    return { ...state, current, gravityAccumulator, lockElapsedMs: 0, lockResetCount: 0 };
+  }
+
+  /**
    * Piece Lock -> Merge Piece -> Find/Clear Full Rows -> Spawn Next Piece
    * -> Check Game Over. clearCompletedRows() removes every completed row
    * (single/double/triple/Tetris, or any non-consecutive combination of
-   * them) as one atomic step and is a no-op when nothing is complete —
-   * scoring, the lines counter, and level updates are still a later
-   * phase; only the board itself changes here.
+   * them) as one atomic step and is a no-op when nothing is complete.
+   * Gravity/lock-delay timing is always reset to a clean slate here — the
+   * newly spawned piece (or Game Over) never inherits the just-locked
+   * piece's leftover timing state. Scoring, the lines counter, and level
+   * updates are still a later phase; only the board itself changes here.
    */
   private lockAndSpawnNext(state: TetrisState, piece: ActivePiece): TetrisState {
     const merged = mergePieceIntoBoard(state.board, piece);
     const board = clearCompletedRows(merged);
-    return this.trySpawn({ ...state, board, current: null }, this.requireQueue());
+    const reset: TetrisState = {
+      ...state,
+      board,
+      current: null,
+      gravityAccumulator: 0,
+      lockElapsedMs: 0,
+      lockResetCount: 0,
+    };
+    return this.trySpawn(reset, this.requireQueue());
   }
 
   /** Draws the next piece and either continues PLAYING or, if it can't legally spawn, ends the game — the board is carried through untouched either way. */

@@ -26,6 +26,12 @@ export const DEFAULT_SCORING = {
 
 export const DEFAULT_LINES_PER_LEVEL = 10;
 
+/** Classic-style lock delay: how long a grounded piece may sit before it locks. Not a final balance value — easy to retune later. */
+export const DEFAULT_LOCK_DELAY_MS = 500;
+
+/** How many times a grounded piece's lock delay may be reset before it locks on schedule regardless of further input — prevents indefinite stalling. */
+export const DEFAULT_LOCK_DELAY_MAX_RESETS = 15;
+
 /** The V1 ruleset. Every rule Tetris needs lives here — the engine (a later phase) only ever reads a TetrisRuleset, never a bare constant. */
 export const DEFAULT_TETRIS_RULESET: TetrisRuleset = {
   boardWidth: BOARD_WIDTH,
@@ -36,4 +42,6 @@ export const DEFAULT_TETRIS_RULESET: TetrisRuleset = {
   scoring: { ...DEFAULT_SCORING },
   pieceGenerator: "seven-bag",
   rotationSystem: "srs",
+  lockDelayMs: DEFAULT_LOCK_DELAY_MS,
+  lockDelayMaxResets: DEFAULT_LOCK_DELAY_MAX_RESETS,
 };

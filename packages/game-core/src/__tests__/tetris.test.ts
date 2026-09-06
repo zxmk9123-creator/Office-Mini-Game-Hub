@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_LOCK_DELAY_MAX_RESETS,
+  DEFAULT_LOCK_DELAY_MS,
   DEFAULT_TETRIS_RULESET,
   PIECE_TYPES,
   PieceQueue,
@@ -33,6 +35,7 @@ import {
   type RotationDirection,
   type TetrisBagSource,
   type TetrisRandomSource,
+  type TetrisState,
 } from "..";
 
 class FixedClock implements Clock {
@@ -46,6 +49,23 @@ const TOTAL_HEIGHT = TETRIS_BUFFER_ROWS + TETRIS_BOARD_HEIGHT;
 
 function emptyBoard() {
   return createEmptyTetrisBoard(TETRIS_BOARD_WIDTH, TOTAL_HEIGHT);
+}
+
+/**
+ * Soft-drops the active piece until it stops moving (grounded), then
+ * advances time past the lock delay to force the lock — the Phase E
+ * replacement for the old "soft-drop until it locks on contact" pattern,
+ * since soft drop no longer force-locks the instant it touches the floor
+ * (see tetris.ts's softDrop doc comment).
+ */
+function dropAndLock(game: TetrisGame, state: TetrisState): TetrisState {
+  let current = state;
+  let previousY: number | undefined;
+  while (current.current && current.current.y !== previousY) {
+    previousY = current.current.y;
+    current = game.handleInput(current, { type: "softDrop" });
+  }
+  return game.handleInput(current, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS });
 }
 
 /** Deterministic sequence source for reproducible shuffle tests. */
@@ -406,14 +426,12 @@ describe("Tetris engine: movement", () => {
 });
 
 describe("Tetris engine: piece locking", () => {
-  it("blocked downward movement (floor) locks the piece in place", () => {
+  it("blocked downward movement (floor), once lock delay expires, locks the piece in place", () => {
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
     let state = game.start(game.createInitialState());
     expect(state.current?.type).toBe("I");
 
-    while (state.current?.type === "I") {
-      state = game.handleInput(state, { type: "softDrop" });
-    }
+    state = dropAndLock(game, state);
 
     // The lock happened, and the next piece from the sequence spawned.
     expect(state.current?.type).toBe("O");
@@ -423,9 +441,7 @@ describe("Tetris engine: piece locking", () => {
   it("the locked piece becomes part of the board, at the floor", () => {
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
     let state = game.start(game.createInitialState());
-    while (state.current?.type === "I") {
-      state = game.handleInput(state, { type: "softDrop" });
-    }
+    state = dropAndLock(game, state);
     const bottomRow = TOTAL_HEIGHT - 1;
     expect(state.board[bottomRow].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
   });
@@ -433,9 +449,7 @@ describe("Tetris engine: piece locking", () => {
   it("locked cells preserve the piece's type", () => {
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["L", "O"]));
     let state = game.start(game.createInitialState());
-    while (state.current?.type === "L") {
-      state = game.handleInput(state, { type: "softDrop" });
-    }
+    state = dropAndLock(game, state);
     const lockedCells = state.board.flatMap((row) => row.filter((c) => c !== null));
     expect(lockedCells.every((c) => c === "L")).toBe(true);
     expect(lockedCells).toHaveLength(4);
@@ -444,9 +458,7 @@ describe("Tetris engine: piece locking", () => {
   it("a next piece is spawned immediately after locking, from the injected sequence", () => {
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "S", "Z"]));
     let state = game.start(game.createInitialState());
-    while (state.current?.type === "I") {
-      state = game.handleInput(state, { type: "softDrop" });
-    }
+    state = dropAndLock(game, state);
     expect(state.current?.type).toBe("S");
     expect(state.next[0]).toBe("Z");
   });
@@ -813,9 +825,7 @@ describe("Tetris rotation: regression — Phase A/B behavior is unaffected", () 
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
     let state = game.start(game.createInitialState());
     expect(state.current?.type).toBe("I");
-    while (state.current?.type === "I") {
-      state = game.handleInput(state, { type: "softDrop" });
-    }
+    state = dropAndLock(game, state);
     expect(state.current?.type).toBe("O");
     expect(state.board[TOTAL_HEIGHT - 1].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
   });
@@ -1014,9 +1024,7 @@ describe("Tetris line clearing: lock integration", () => {
   it("locking without completing any row behaves exactly as before line clearing existed", () => {
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
     let state = game.start(game.createInitialState());
-    while (state.current?.type === "I") {
-      state = game.handleInput(state, { type: "softDrop" });
-    }
+    state = dropAndLock(game, state);
     expect(state.current?.type).toBe("O"); // next-piece spawning remains correct
     expect(getCompletedRows(state.board)).toEqual([]); // nothing to clear — a lone I piece never fills a 10-wide row
     expect(state.board[TOTAL_HEIGHT - 1].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
@@ -1037,6 +1045,324 @@ describe("Tetris line clearing: lock integration", () => {
 
 describe("Tetris line clearing: regression — Phase A/B/C behavior is unaffected", () => {
   it("rotation, movement, and hard drop still work exactly as before line clearing was added", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "rotateCw" });
+    expect(state.current?.rotation).toBe(1);
+    const distance = getDropDistance(state.board, state.current!);
+    const dropped = game.handleInput(state, { type: "hardDrop" });
+    expect(dropped.current?.type).toBe("L");
+    const lockedPiece: ActivePiece = { ...state.current!, y: state.current!.y + distance };
+    for (const cell of cellsForPiece(lockedPiece)) {
+      expect(dropped.board[cell.row][cell.col]).toBe("T");
+    }
+  });
+});
+
+describe("Tetris gravity: time-driven falling", () => {
+  const GRAVITY_INTERVAL_MS = DEFAULT_TETRIS_RULESET.gravity[0]; // level 1
+  const STEPS_TO_GROUND_O = TOTAL_HEIGHT - 3; // O's max valid y, from spawn y=0
+  const GROUND_O_MS = STEPS_TO_GROUND_O * GRAVITY_INTERVAL_MS;
+
+  function startedO() {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    const state = game.start(game.createInitialState());
+    return { game, state };
+  }
+
+  it("the piece does not fall before a full gravity interval has elapsed", () => {
+    const { game, state } = startedO();
+    const ticked = game.handleInput(state, { type: "tick", dtMs: GRAVITY_INTERVAL_MS - 1 });
+    expect(ticked.current?.y).toBe(state.current!.y);
+    expect(ticked.gravityAccumulator).toBe(GRAVITY_INTERVAL_MS - 1);
+  });
+
+  it("the piece falls exactly one cell after exactly one gravity interval", () => {
+    const { game, state } = startedO();
+    const ticked = game.handleInput(state, { type: "tick", dtMs: GRAVITY_INTERVAL_MS });
+    expect(ticked.current?.y).toBe(state.current!.y + 1);
+    expect(ticked.gravityAccumulator).toBe(0);
+  });
+
+  it("multiple elapsed intervals in one tick are all consumed deterministically, not lost", () => {
+    const { game, state } = startedO();
+    const ticked = game.handleInput(state, { type: "tick", dtMs: GRAVITY_INTERVAL_MS * 2 + 500 });
+    expect(ticked.current?.y).toBe(state.current!.y + 2);
+    expect(ticked.gravityAccumulator).toBe(500);
+  });
+
+  it("gravity never moves a piece through the floor, even given a huge single dtMs", () => {
+    const { game, state } = startedO();
+    const ticked = game.handleInput(state, { type: "tick", dtMs: GROUND_O_MS + 50_000 });
+    expect(ticked.current?.y).toBe(STEPS_TO_GROUND_O);
+    expect(canPlace(ticked.board, ticked.current!)).toBe(true);
+    // Grounded: one further row down is genuinely invalid.
+    expect(canPlace(ticked.board, { ...ticked.current!, y: ticked.current!.y + 1 })).toBe(false);
+  });
+
+  it("gravity accumulation resets (is fully consumed) after a successful downward movement", () => {
+    const { game, state } = startedO();
+    const ticked = game.handleInput(state, { type: "tick", dtMs: GRAVITY_INTERVAL_MS });
+    expect(ticked.gravityAccumulator).toBe(0);
+  });
+});
+
+describe("Tetris lock delay", () => {
+  const GRAVITY_INTERVAL_MS = DEFAULT_TETRIS_RULESET.gravity[0];
+  const STEPS_TO_GROUND_O = TOTAL_HEIGHT - 3;
+  const GROUND_O_MS = STEPS_TO_GROUND_O * GRAVITY_INTERVAL_MS;
+
+  function groundedO() {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "tick", dtMs: GROUND_O_MS });
+    expect(canPlace(state.board, { ...state.current!, y: state.current!.y + 1 })).toBe(false); // sanity: truly grounded
+    expect(state.lockElapsedMs).toBe(0); // just landed this tick — delay hasn't started counting yet
+    return { game, state };
+  }
+
+  it("a grounded piece does not immediately lock", () => {
+    const { game, state } = groundedO();
+    const after = game.handleInput(state, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS - 1 });
+    expect(after.status).toBe("playing");
+    expect(after.current?.type).toBe("O");
+  });
+
+  it("lock delay begins accumulating once downward movement is blocked", () => {
+    const { game, state } = groundedO();
+    const after = game.handleInput(state, { type: "tick", dtMs: 200 });
+    expect(after.lockElapsedMs).toBe(200);
+  });
+
+  it("the piece locks once lock delay expires", () => {
+    const { game, state } = groundedO();
+    const after = game.handleInput(state, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS });
+    expect(after.current?.type).toBe("T"); // locked and the next piece spawned
+    expect(after.status).toBe("playing");
+  });
+
+  it("moving left/right during lock delay is still allowed", () => {
+    const { game, state } = groundedO();
+    const partiallyDelayed = game.handleInput(state, { type: "tick", dtMs: 100 });
+    const moved = game.handleInput(partiallyDelayed, { type: "moveLeft" });
+    expect(moved.current?.x).toBe(partiallyDelayed.current!.x - 1);
+    expect(moved.current?.type).toBe("O"); // still hasn't locked
+  });
+
+  it("rotating during lock delay is still allowed", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+    let state = game.start(game.createInitialState());
+    const maxRow = TOTAL_HEIGHT - 1;
+    // Ground a T piece directly at rotation 0 (already validated placement logic in Phase C).
+    while (canPlace(state.board, { ...state.current!, y: state.current!.y + 1 })) {
+      state = game.handleInput(state, { type: "tick", dtMs: GRAVITY_INTERVAL_MS });
+    }
+    const delayed = game.handleInput(state, { type: "tick", dtMs: 100 });
+    const rotated = game.handleInput(delayed, { type: "rotateCw" });
+    expect(rotated.current?.rotation).toBe(1);
+    expect(rotated.current?.type).toBe("T"); // still hasn't locked
+    void maxRow;
+  });
+
+  it("a successful move/rotate while grounded resets lock delay", () => {
+    const { game, state } = groundedO();
+    const delayed = game.handleInput(state, { type: "tick", dtMs: 400 });
+    expect(delayed.lockElapsedMs).toBe(400);
+
+    const moved = game.handleInput(delayed, { type: "moveLeft" });
+    expect(moved.lockElapsedMs).toBe(0);
+    expect(moved.lockResetCount).toBe(1);
+
+    // The reset bought more time: another 400ms (which would have expired the un-reset delay) still doesn't lock.
+    const afterMore = game.handleInput(moved, { type: "tick", dtMs: 400 });
+    expect(afterMore.current?.type).toBe("O");
+  });
+
+  it("the reset limit prevents indefinite stalling: once spent, further moves no longer reset the timer", () => {
+    const { game, state: s0 } = groundedO();
+    let state = s0;
+    for (let i = 0; i < DEFAULT_LOCK_DELAY_MAX_RESETS; i++) {
+      state = game.handleInput(state, { type: i % 2 === 0 ? "moveRight" : "moveLeft" });
+      expect(state.lockResetCount).toBe(i + 1);
+      expect(state.lockElapsedMs).toBe(0);
+    }
+    expect(state.lockResetCount).toBe(DEFAULT_LOCK_DELAY_MAX_RESETS);
+
+    state = game.handleInput(state, { type: "tick", dtMs: 100 });
+    expect(state.lockElapsedMs).toBe(100);
+
+    // The reset budget is spent: this move still succeeds positionally, but no longer resets the timer.
+    state = game.handleInput(state, { type: "moveRight" });
+    expect(state.lockResetCount).toBe(DEFAULT_LOCK_DELAY_MAX_RESETS);
+    expect(state.lockElapsedMs).toBe(100);
+
+    // ...and the delay still expires on schedule from there.
+    state = game.handleInput(state, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS - 100 });
+    expect(state.current?.type).toBe("T");
+  });
+
+  it("lock delay (elapsed + reset count) is cleared once the piece actually locks", () => {
+    const { game, state } = groundedO();
+    const delayed = game.handleInput(state, { type: "tick", dtMs: 300 });
+    const moved = game.handleInput(delayed, { type: "moveLeft" }); // lockResetCount now 1
+    const locked = game.handleInput(moved, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS });
+    expect(locked.current?.type).toBe("T");
+    expect(locked.lockElapsedMs).toBe(0);
+    expect(locked.lockResetCount).toBe(0);
+    expect(locked.gravityAccumulator).toBe(0);
+  });
+
+  it("lock delay is cleared for the freshly spawned piece — no leakage between pieces", () => {
+    const { game, state } = groundedO();
+    const locked = game.handleInput(state, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS });
+    expect(locked.current?.type).toBe("T");
+    expect(locked.lockElapsedMs).toBe(0);
+    expect(locked.lockResetCount).toBe(0);
+  });
+});
+
+describe("Tetris soft drop: respects lock delay (Phase E behavior change from Phase B)", () => {
+  it("soft drop still moves the piece down one cell when unobstructed", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const state = game.start(game.createInitialState());
+    const moved = game.handleInput(state, { type: "softDrop" });
+    expect(moved.current?.y).toBe(state.current!.y + 1);
+    expect(moved.gravityAccumulator).toBe(0);
+  });
+
+  it("a blocked soft drop does not bypass lock delay or lock immediately", () => {
+    const GRAVITY_INTERVAL_MS = DEFAULT_TETRIS_RULESET.gravity[0];
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "tick", dtMs: (TOTAL_HEIGHT - 3) * GRAVITY_INTERVAL_MS });
+    expect(canPlace(state.board, { ...state.current!, y: state.current!.y + 1 })).toBe(false); // grounded
+
+    const blocked = game.handleInput(state, { type: "softDrop" });
+    expect(blocked).toEqual(state); // a complete no-op — no lock, no state change
+    expect(blocked.current?.type).toBe("O");
+    expect(blocked.status).toBe("playing");
+  });
+});
+
+describe("Tetris hard drop: bypasses lock delay entirely", () => {
+  it("hard drop locks immediately even mid-lock-delay", () => {
+    const GRAVITY_INTERVAL_MS = DEFAULT_TETRIS_RULESET.gravity[0];
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "tick", dtMs: (TOTAL_HEIGHT - 3) * GRAVITY_INTERVAL_MS });
+    state = game.handleInput(state, { type: "tick", dtMs: 200 }); // partway through lock delay, not expired
+    expect(state.current?.type).toBe("O");
+
+    const dropped = game.handleInput(state, { type: "hardDrop" });
+    expect(dropped.current?.type).toBe("T"); // locked immediately regardless of the unexpired delay
+    expect(dropped.status).toBe("playing");
+  });
+
+  it("line clearing and next-piece spawning still occur correctly after a hard drop", () => {
+    const board = emptyBoard();
+    const bottomRow = TOTAL_HEIGHT - 1;
+    const secondFromBottom = TOTAL_HEIGHT - 2;
+    for (const row of [secondFromBottom, bottomRow]) {
+      for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+        if (col !== 4 && col !== 5) board[row][col] = "L";
+      }
+    }
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    const state = game.start({ ...game.createInitialState(), board });
+    const dropped = game.handleInput(state, { type: "hardDrop" });
+
+    expect(dropped.current?.type).toBe("T");
+    expect(dropped.board.every((row) => row.every((c) => c === null))).toBe(true);
+  });
+});
+
+describe("Tetris gravity + lock delay: engine integration", () => {
+  it("gravity -> grounded -> lock delay expiry -> line clear -> next piece, driven entirely by ticks", () => {
+    const GRAVITY_INTERVAL_MS = DEFAULT_TETRIS_RULESET.gravity[0];
+    const board = emptyBoard();
+    const bottomRow = TOTAL_HEIGHT - 1;
+    const secondFromBottom = TOTAL_HEIGHT - 2;
+    for (const row of [secondFromBottom, bottomRow]) {
+      for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+        if (col !== 4 && col !== 5) board[row][col] = "L";
+      }
+    }
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    let state = game.start({ ...game.createInitialState(), board });
+
+    // Fall all the way down via gravity alone, then let lock delay expire.
+    state = game.handleInput(state, { type: "tick", dtMs: (TOTAL_HEIGHT - 3) * GRAVITY_INTERVAL_MS });
+    expect(state.current?.type).toBe("O");
+    state = game.handleInput(state, { type: "tick", dtMs: DEFAULT_LOCK_DELAY_MS });
+
+    expect(state.current?.type).toBe("T");
+    expect(state.status).toBe("playing");
+    expect(state.board.every((row) => row.every((c) => c === null))).toBe(true);
+  });
+
+  it("game over after a blocked next-piece spawn still works, and a further tick is inert", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const board = emptyBoard();
+    for (const cell of cellsForPiece(spawnPiece("O"))) {
+      board[cell.row][cell.col] = "T";
+    }
+    const started = game.start({ ...game.createInitialState(), board });
+    expect(started.status).toBe("gameOver");
+
+    const afterTick = game.handleInput(started, { type: "tick", dtMs: 10_000 });
+    expect(afterTick).toEqual(started);
+  });
+
+  it("SRS wall kicks still work correctly during lock delay", () => {
+    const GRAVITY_INTERVAL_MS = DEFAULT_TETRIS_RULESET.gravity[0];
+    const maxRow = TOTAL_HEIGHT - 1;
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+    let state = game.start(game.createInitialState());
+    // Ground the T piece at the floor via gravity.
+    while (canPlace(state.board, { ...state.current!, y: state.current!.y + 1 })) {
+      state = game.handleInput(state, { type: "tick", dtMs: GRAVITY_INTERVAL_MS });
+    }
+    expect(state.current?.y).toBe(maxRow - 1); // T's lowest relative row is 1
+    const rotated = game.handleInput(state, { type: "rotateCw" }); // needs the floor kick from Phase C
+    expect(rotated.current?.rotation).toBe(1);
+    expect(rotated.current?.y).toBeLessThan(state.current!.y); // kicked upward to fit
+  });
+});
+
+describe("Tetris gravity + lock delay: determinism", () => {
+  it("identical state + inputs + delta-times always produce identical results", () => {
+    const inputs: (
+      | { type: "tick"; dtMs: number }
+      | { type: "moveLeft" }
+      | { type: "moveRight" }
+      | { type: "rotateCw" }
+      | { type: "softDrop" }
+    )[] = [
+      { type: "tick", dtMs: 350 },
+      { type: "moveRight" },
+      { type: "tick", dtMs: 700 },
+      { type: "rotateCw" },
+      { type: "softDrop" },
+      { type: "tick", dtMs: 1200 },
+      { type: "moveLeft" },
+      { type: "tick", dtMs: 10_000 },
+    ];
+
+    function run() {
+      const game = new TetrisGame(new FixedClock(), new SevenBagGenerator(new SequenceRandomSource([0.3, 0.6, 0.1, 0.9, 0.4, 0.7])));
+      let state = game.start(game.createInitialState());
+      for (const input of inputs) {
+        state = game.handleInput(state, input);
+      }
+      return state;
+    }
+
+    expect(run()).toEqual(run());
+  });
+});
+
+describe("Tetris gravity + lock delay: regression — Phase A/B/C/D behavior is unaffected", () => {
+  it("hard drop, rotation, and line clearing still work exactly as before gravity/lock delay were added", () => {
     const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
     let state = game.start(game.createInitialState());
     state = game.handleInput(state, { type: "rotateCw" });

@@ -1,11 +1,12 @@
-// Phase A-D: types, ruleset/constants, piece shape data, board primitives
+// Phase A-E: types, ruleset/constants, piece shape data, board primitives
 // + locking + line-clear/compression, the injectable 7-bag generator +
-// peekable queue, collision/drop-distance, SRS rotation + wall kicks, and
-// TetrisGame itself covering spawn/movement/collision/locking/line-clear/
-// game-over/rotation. Scoring, the lines/level counters, and gravity/time
-// are later phases — their TetrisInput variants exist but are no-ops in
-// TetrisGame until then, and this module is intentionally NOT registered
-// in gameRegistry.ts until session/result/ranking integration is done too.
+// peekable queue, collision/drop-distance, SRS rotation + wall kicks,
+// time-driven gravity + Classic-style lock delay, and TetrisGame itself
+// covering spawn/movement/collision/locking/line-clear/game-over/rotation/
+// gravity. Scoring and level progression are later phases — the "pause"/
+// "restart" TetrisInput variants exist but are no-ops in TetrisGame until
+// then, and this module is intentionally NOT registered in
+// gameRegistry.ts until session/result/ranking integration is done too.
 
 export {
   PIECE_TYPES,
@@ -30,8 +31,12 @@ export {
   DEFAULT_GRAVITY_TABLE,
   DEFAULT_SCORING,
   DEFAULT_LINES_PER_LEVEL,
+  DEFAULT_LOCK_DELAY_MS,
+  DEFAULT_LOCK_DELAY_MAX_RESETS,
   DEFAULT_TETRIS_RULESET,
 } from "./constants";
+
+export { gravityIntervalMs } from "./gravity";
 
 export { SPAWN_X, SPAWN_Y, spawnPiece, cellsForPiece, createEmptyBoard } from "./pieces";
 

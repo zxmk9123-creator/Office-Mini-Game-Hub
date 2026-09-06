@@ -42,9 +42,14 @@ export type TetrisStatus = "ready" | "playing" | "paused" | "gameOver";
 /**
  * Fully serializable/deterministic — no Date/timer/DOM references anywhere
  * in this shape. `next` is the upcoming-piece queue shown to the player
- * (see queue.ts); `gravityAccumulator` is milliseconds of unconsumed fall
- * time, advanced by advanceTime() (a later phase) rather than any timer
- * living inside this state.
+ * (see queue.ts). `gravityAccumulator` is milliseconds of unconsumed fall
+ * time, advanced by the "tick" input (see gravity.ts). `lockElapsedMs` is
+ * milliseconds the active piece has spent grounded (unable to move down)
+ * since it last became grounded or had its lock delay reset — 0 whenever
+ * it isn't currently grounded. `lockResetCount` counts how many times
+ * lock delay has been reset (by a successful move/rotate while grounded)
+ * for the CURRENT grounded piece, capped by the ruleset's
+ * lockDelayMaxResets so a piece can't be stalled in place forever.
  */
 export interface TetrisState {
   status: TetrisStatus;
@@ -55,6 +60,8 @@ export interface TetrisState {
   lines: number;
   level: number;
   gravityAccumulator: number;
+  lockElapsedMs: number;
+  lockResetCount: number;
 }
 
 /**
@@ -109,4 +116,8 @@ export interface TetrisRuleset {
   /** Named rather than a function reference, so a ruleset stays a plain serializable value — the engine resolves the name to a concrete generator/rotation implementation. */
   pieceGenerator: "seven-bag";
   rotationSystem: "srs";
+  /** Milliseconds a grounded piece may sit before it locks — see gravity.ts. */
+  lockDelayMs: number;
+  /** How many times a grounded piece's lock delay may be reset (by a successful move/rotate) before it's forced to lock on schedule regardless — prevents indefinite stalling. */
+  lockDelayMaxResets: number;
 }
