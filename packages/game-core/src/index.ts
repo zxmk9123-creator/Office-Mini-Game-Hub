@@ -140,6 +140,8 @@ export {
   getCell as getTetrisCell,
   isCellEmpty as isTetrisCellEmpty,
   mergePieceIntoBoard,
+  getCompletedRows,
+  clearCompletedRows,
   canPlace,
   getDropDistance,
   getRotationCandidates,

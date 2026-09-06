@@ -12,7 +12,9 @@ import {
   TetrisGame,
   canPlace,
   cellsForPiece,
+  clearCompletedRows,
   createEmptyTetrisBoard,
+  getCompletedRows,
   getDropDistance,
   getRotationCandidates,
   getTetrisCell,
@@ -816,5 +818,235 @@ describe("Tetris rotation: regression — Phase A/B behavior is unaffected", () 
     }
     expect(state.current?.type).toBe("O");
     expect(state.board[TOTAL_HEIGHT - 1].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
+  });
+});
+
+function fillRow(board: ReturnType<typeof emptyBoard>, row: number) {
+  board[row] = Array.from({ length: TETRIS_BOARD_WIDTH }, (): "L" => "L");
+}
+
+describe("Tetris line clearing: detection (getCompletedRows)", () => {
+  it("reports no completed rows on an empty board", () => {
+    expect(getCompletedRows(emptyBoard())).toEqual([]);
+  });
+
+  it("detects one completed row", () => {
+    const board = emptyBoard();
+    fillRow(board, 10);
+    expect(getCompletedRows(board)).toEqual([10]);
+  });
+
+  it("detects two completed rows", () => {
+    const board = emptyBoard();
+    fillRow(board, 10);
+    fillRow(board, 11);
+    expect(getCompletedRows(board)).toEqual([10, 11]);
+  });
+
+  it("detects three completed rows", () => {
+    const board = emptyBoard();
+    fillRow(board, 10);
+    fillRow(board, 11);
+    fillRow(board, 12);
+    expect(getCompletedRows(board)).toEqual([10, 11, 12]);
+  });
+
+  it("detects four completed rows (a Tetris)", () => {
+    const board = emptyBoard();
+    for (const row of [10, 11, 12, 13]) fillRow(board, row);
+    expect(getCompletedRows(board)).toEqual([10, 11, 12, 13]);
+  });
+
+  it("detects a completed row at the very top", () => {
+    const board = emptyBoard();
+    fillRow(board, 0);
+    expect(getCompletedRows(board)).toEqual([0]);
+  });
+
+  it("detects a completed row at the very bottom", () => {
+    const board = emptyBoard();
+    fillRow(board, TOTAL_HEIGHT - 1);
+    expect(getCompletedRows(board)).toEqual([TOTAL_HEIGHT - 1]);
+  });
+
+  it("detects non-consecutive completed rows, and only those rows", () => {
+    const board = emptyBoard();
+    fillRow(board, 5);
+    fillRow(board, 15);
+    board[9][3] = "L"; // a partially-filled row must never count as completed
+    expect(getCompletedRows(board)).toEqual([5, 15]);
+  });
+});
+
+describe("Tetris line clearing: clearCompletedRows", () => {
+  it("is a no-op (same reference) when nothing is complete", () => {
+    const board = emptyBoard();
+    board[10][3] = "L";
+    expect(clearCompletedRows(board)).toBe(board);
+  });
+
+  it("removes a single completed row, preserving the board's exact dimensions", () => {
+    const board = emptyBoard();
+    fillRow(board, TOTAL_HEIGHT - 1);
+    const cleared = clearCompletedRows(board);
+
+    expect(cleared).toHaveLength(TOTAL_HEIGHT);
+    for (const row of cleared) {
+      expect(row).toHaveLength(TETRIS_BOARD_WIDTH);
+    }
+    expect(getCompletedRows(cleared)).toEqual([]);
+  });
+
+  it("adds exactly one fresh empty row at the top for a single-line clear", () => {
+    const board = emptyBoard();
+    fillRow(board, TOTAL_HEIGHT - 1);
+    const cleared = clearCompletedRows(board);
+    expect(cleared[0].every((c) => c === null)).toBe(true);
+  });
+
+  it("removes multiple completed rows simultaneously (double/triple/Tetris), in one atomic result", () => {
+    for (const rowsToFill of [[10, 11], [10, 11, 12], [10, 11, 12, 13]]) {
+      const board = emptyBoard();
+      for (const row of rowsToFill) fillRow(board, row);
+      const cleared = clearCompletedRows(board);
+
+      expect(cleared).toHaveLength(TOTAL_HEIGHT);
+      expect(getCompletedRows(cleared)).toEqual([]);
+      // Exactly rowsToFill.length fresh empty rows at the top.
+      for (let i = 0; i < rowsToFill.length; i++) {
+        expect(cleared[i].every((c) => c === null)).toBe(true);
+      }
+    }
+  });
+
+  it("shifts surviving rows above the clear down by exactly the number of rows removed, leaving rows below untouched, and preserves every surviving cell's piece type", () => {
+    const board = emptyBoard();
+    board[3][2] = "L"; // above both cleared rows
+    fillRow(board, 8);
+    fillRow(board, 9);
+    board[15][7] = "Z"; // below both cleared rows
+
+    const cleared = clearCompletedRows(board);
+
+    expect(cleared).toHaveLength(TOTAL_HEIGHT);
+    expect(getCompletedRows(cleared)).toEqual([]);
+    expect(cleared[0].every((c) => c === null)).toBe(true);
+    expect(cleared[1].every((c) => c === null)).toBe(true);
+    // row 3 shifts down by 2 (both cleared rows were below it).
+    expect(cleared[5][2]).toBe("L");
+    // row 15 is untouched — no cleared rows were below it.
+    expect(cleared[15][7]).toBe("Z");
+  });
+
+  it("clears non-consecutive completed rows together, still in one atomic result", () => {
+    const board = emptyBoard();
+    board[2][0] = "L";
+    fillRow(board, 6);
+    board[9][1] = "L";
+    fillRow(board, 14);
+    board[18][9] = "L";
+
+    const cleared = clearCompletedRows(board);
+
+    expect(getCompletedRows(cleared)).toEqual([]);
+    expect(cleared).toHaveLength(TOTAL_HEIGHT);
+    // Two rows cleared total -> two fresh empty rows at the top.
+    expect(cleared[0].every((c) => c === null)).toBe(true);
+    expect(cleared[1].every((c) => c === null)).toBe(true);
+    // row 2 (above both clears) shifts down by 2 -> row 4.
+    expect(cleared[4][0]).toBe("L");
+    // row 9 (above only the row-14 clear, below the row-6 clear) shifts down by 1 -> row 10.
+    expect(cleared[10][1]).toBe("L");
+    // row 18 (below both clears) is untouched.
+    expect(cleared[18][9]).toBe("L");
+  });
+});
+
+describe("Tetris line clearing: lock integration", () => {
+  it("locking a piece that completes rows clears them before the next piece spawns", () => {
+    const board = emptyBoard();
+    const bottomRow = TOTAL_HEIGHT - 1;
+    const secondFromBottom = TOTAL_HEIGHT - 2;
+    // Fill the bottom two rows entirely except columns 4-5 — exactly the
+    // gap an O piece hard-dropped from its default spawn column will fill.
+    for (const row of [secondFromBottom, bottomRow]) {
+      for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+        if (col !== 4 && col !== 5) board[row][col] = "L";
+      }
+    }
+
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    const state = game.start({ ...game.createInitialState(), board });
+    expect(state.current?.type).toBe("O");
+
+    const afterDrop = game.handleInput(state, { type: "hardDrop" });
+
+    // Both rows were completed by the drop and are now gone entirely —
+    // the board is back to fully empty — and the next piece already spawned.
+    expect(afterDrop.status).toBe("playing");
+    expect(afterDrop.current?.type).toBe("T");
+    expect(afterDrop.board.every((row) => row.every((c) => c === null))).toBe(true);
+  });
+
+  it("locking a piece that completes only one of two nearly-full rows clears just that one", () => {
+    const board = emptyBoard();
+    const bottomRow = TOTAL_HEIGHT - 1;
+    const secondFromBottom = TOTAL_HEIGHT - 2;
+    // Bottom row missing only columns 4-5; the row above it missing columns 4-5 AND 6 (so only the bottom row completes).
+    for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+      if (col !== 4 && col !== 5) board[bottomRow][col] = "L";
+      if (col !== 4 && col !== 5 && col !== 6) board[secondFromBottom][col] = "L";
+    }
+
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    const state = game.start({ ...game.createInitialState(), board });
+    const afterDrop = game.handleInput(state, { type: "hardDrop" });
+
+    expect(afterDrop.current?.type).toBe("T");
+    // Only the bottom row was cleared: one fresh empty row at the top, and the
+    // second-from-bottom row (now shifted down by one) still has its column-6 gap.
+    expect(afterDrop.board[0].every((c) => c === null)).toBe(true);
+    expect(afterDrop.board[bottomRow][6]).toBeNull();
+    expect(afterDrop.board[bottomRow][4]).toBe("O");
+    expect(afterDrop.board[bottomRow][5]).toBe("O");
+  });
+
+  it("locking without completing any row behaves exactly as before line clearing existed", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
+    let state = game.start(game.createInitialState());
+    while (state.current?.type === "I") {
+      state = game.handleInput(state, { type: "softDrop" });
+    }
+    expect(state.current?.type).toBe("O"); // next-piece spawning remains correct
+    expect(getCompletedRows(state.board)).toEqual([]); // nothing to clear — a lone I piece never fills a 10-wide row
+    expect(state.board[TOTAL_HEIGHT - 1].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
+  });
+
+  it("game-over detection remains correct with line clearing wired in", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const board = emptyBoard();
+    for (const cell of cellsForPiece(spawnPiece("O"))) {
+      board[cell.row][cell.col] = "T";
+    }
+    const started = game.start({ ...game.createInitialState(), board });
+    expect(started.status).toBe("gameOver");
+    expect(started.current).toBeNull();
+    expect(started.board).toEqual(board); // untouched, exactly as in Phase B
+  });
+});
+
+describe("Tetris line clearing: regression — Phase A/B/C behavior is unaffected", () => {
+  it("rotation, movement, and hard drop still work exactly as before line clearing was added", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "rotateCw" });
+    expect(state.current?.rotation).toBe(1);
+    const distance = getDropDistance(state.board, state.current!);
+    const dropped = game.handleInput(state, { type: "hardDrop" });
+    expect(dropped.current?.type).toBe("L");
+    const lockedPiece: ActivePiece = { ...state.current!, y: state.current!.y + distance };
+    for (const cell of cellsForPiece(lockedPiece)) {
+      expect(dropped.board[cell.row][cell.col]).toBe("T");
+    }
   });
 });

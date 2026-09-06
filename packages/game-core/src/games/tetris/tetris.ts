@@ -1,7 +1,7 @@
 import type { Game, GameMetadata, GameResult } from "../../types";
 import type { Clock } from "../reaction-test/types";
 import { canPlace, getDropDistance } from "./collision";
-import { createEmptyBoard, mergePieceIntoBoard } from "./board";
+import { clearCompletedRows, createEmptyBoard, mergePieceIntoBoard } from "./board";
 import { MathRandomSource, SevenBagGenerator, type BagSource } from "./generator";
 import { spawnPiece } from "./pieces";
 import { PieceQueue } from "./queue";
@@ -164,13 +164,16 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
   }
 
   /**
-   * Piece Lock -> Merge Piece -> Spawn Next Piece -> Check Game Over. Line
-   * clearing, scoring, and level updates are deliberately absent — full
-   * rows stay on the board exactly as they land until the line-clear
-   * phase exists.
+   * Piece Lock -> Merge Piece -> Find/Clear Full Rows -> Spawn Next Piece
+   * -> Check Game Over. clearCompletedRows() removes every completed row
+   * (single/double/triple/Tetris, or any non-consecutive combination of
+   * them) as one atomic step and is a no-op when nothing is complete —
+   * scoring, the lines counter, and level updates are still a later
+   * phase; only the board itself changes here.
    */
   private lockAndSpawnNext(state: TetrisState, piece: ActivePiece): TetrisState {
-    const board = mergePieceIntoBoard(state.board, piece);
+    const merged = mergePieceIntoBoard(state.board, piece);
+    const board = clearCompletedRows(merged);
     return this.trySpawn({ ...state, board, current: null }, this.requireQueue());
   }
 
