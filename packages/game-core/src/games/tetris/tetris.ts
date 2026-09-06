@@ -5,6 +5,7 @@ import { createEmptyBoard, mergePieceIntoBoard } from "./board";
 import { MathRandomSource, SevenBagGenerator, type BagSource } from "./generator";
 import { spawnPiece } from "./pieces";
 import { PieceQueue } from "./queue";
+import { getRotationCandidates, type RotationDirection } from "./rotation";
 import { DEFAULT_TETRIS_RULESET } from "./constants";
 import type { ActivePiece, TetrisInput, TetrisResultMetadata, TetrisState } from "./types";
 
@@ -16,10 +17,10 @@ import type { ActivePiece, TetrisInput, TetrisResultMetadata, TetrisState } from
 const PREVIEW_COUNT = 3;
 
 /**
- * Phase B only: spawn, left/right/soft-drop/hard-drop movement,
- * collision, locking, and game-over detection. Rotation, scoring, line
- * clearing, level progression, and gravity timing are later phases —
- * `rotateCw`/`rotateCcw`/`pause`/`restart`/`tick` are all accepted (the
+ * Phase A-C: spawn, left/right/soft-drop/hard-drop movement, collision,
+ * locking, game-over detection, and SRS rotation with wall kicks (see
+ * rotation.ts). Scoring, line clearing, level progression, and gravity
+ * timing are later phases — `pause`/`restart`/`tick` are accepted (the
  * Game contract must handle every declared TetrisInput) but are no-ops
  * for now, exactly like an unimplemented-yet branch in any other engine's
  * handleInput.
@@ -93,11 +94,13 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
         return this.softDrop(state);
       case "hardDrop":
         return this.hardDrop(state);
-      // Rotation (Phase C), scoring/level/gravity (Phases D-E), and
-      // pause/restart semantics are all later work — every other input
-      // is a deliberate no-op for now, not a missing case.
       case "rotateCw":
+        return this.rotate(state, "cw");
       case "rotateCcw":
+        return this.rotate(state, "ccw");
+      // Scoring/level/gravity (Phases D-E) and pause/restart semantics
+      // are all later work — every other input is a deliberate no-op for
+      // now, not a missing case.
       case "pause":
       case "restart":
       case "tick":
@@ -117,6 +120,26 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
       return state;
     }
     return { ...state, current: candidate };
+  }
+
+  /**
+   * SRS rotation: try the plain rotated position first, then each wall-
+   * kick candidate in the table's priority order, accepting the first one
+   * canPlace() allows. If every candidate collides, the piece's position
+   * AND rotation state are both left completely unchanged — a rejected
+   * rotation is indistinguishable from no input at all. Never touches the
+   * board; only ever reads it via the existing canPlace().
+   */
+  private rotate(state: TetrisState, direction: RotationDirection): TetrisState {
+    if (state.status !== "playing" || !state.current) {
+      return state;
+    }
+    for (const candidate of getRotationCandidates(state.current, direction)) {
+      if (canPlace(state.board, candidate)) {
+        return { ...state, current: candidate };
+      }
+    }
+    return state;
   }
 
   private softDrop(state: TetrisState): TetrisState {

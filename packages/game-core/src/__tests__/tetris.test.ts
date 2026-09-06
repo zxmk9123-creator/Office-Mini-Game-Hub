@@ -14,10 +14,12 @@ import {
   cellsForPiece,
   createEmptyTetrisBoard,
   getDropDistance,
+  getRotationCandidates,
   getTetrisCell,
   isTetrisCellEmpty,
   isTetrisCellInBounds,
   mergePieceIntoBoard,
+  nextRotation,
   shuffledBag,
   spawnPiece,
   tetrisBoardHeight,
@@ -26,6 +28,7 @@ import {
   type Clock,
   type PieceType,
   type Rotation,
+  type RotationDirection,
   type TetrisBagSource,
   type TetrisRandomSource,
 } from "..";
@@ -545,5 +548,273 @@ describe("Tetris engine: regression — Phase A behavior is unaffected", () => {
         expect(state.current.type).toBe(predictedNext);
       }
     }
+  });
+});
+
+describe("Tetris rotation state machine (nextRotation)", () => {
+  it("cycles clockwise 0 -> 1 -> 2 -> 3 -> 0", () => {
+    let r: Rotation = 0;
+    const seen: Rotation[] = [r];
+    for (let i = 0; i < 4; i++) {
+      r = nextRotation(r, "cw");
+      seen.push(r);
+    }
+    expect(seen).toEqual([0, 1, 2, 3, 0]);
+  });
+
+  it("cycles counter-clockwise 0 -> 3 -> 2 -> 1 -> 0", () => {
+    let r: Rotation = 0;
+    const seen: Rotation[] = [r];
+    for (let i = 0; i < 4; i++) {
+      r = nextRotation(r, "ccw");
+      seen.push(r);
+    }
+    expect(seen).toEqual([0, 3, 2, 1, 0]);
+  });
+});
+
+describe("Tetris rotation: basic rotation on an empty board (getRotationCandidates + canPlace)", () => {
+  const rotatablePieces: PieceType[] = ["J", "L", "S", "Z", "T", "I"];
+
+  function firstValidCandidate(piece: ActivePiece, direction: RotationDirection, board = emptyBoard()): ActivePiece {
+    const candidate = getRotationCandidates(piece, direction).find((c) => canPlace(board, c));
+    if (!candidate) throw new Error("expected at least one valid rotation candidate");
+    return candidate;
+  }
+
+  for (const type of rotatablePieces) {
+    it(`${type} rotates clockwise from spawn on an empty board`, () => {
+      const piece = spawnPiece(type);
+      const rotated = firstValidCandidate(piece, "cw");
+      expect(rotated.rotation).toBe(1);
+      expect(rotated.type).toBe(type);
+    });
+
+    it(`${type} rotates counter-clockwise from spawn on an empty board`, () => {
+      const piece = spawnPiece(type);
+      const rotated = firstValidCandidate(piece, "ccw");
+      expect(rotated.rotation).toBe(3);
+    });
+  }
+
+  it("O remains visually stable: every rotation state occupies the exact same cells", () => {
+    const piece = spawnPiece("O");
+    const originalCells = cellsForPiece(piece)
+      .map((c) => `${c.row},${c.col}`)
+      .sort();
+    let current = piece;
+    for (let i = 0; i < 4; i++) {
+      current = firstValidCandidate(current, "cw");
+      const cells = cellsForPiece(current)
+        .map((c) => `${c.row},${c.col}`)
+        .sort();
+      expect(cells).toEqual(originalCells);
+    }
+    // A full clockwise cycle returns to rotation 0 with position unchanged.
+    expect(current).toEqual(piece);
+  });
+
+  it("O never drifts position across repeated counter-clockwise rotation either", () => {
+    let current = spawnPiece("O");
+    const originalX = current.x;
+    const originalY = current.y;
+    for (let i = 0; i < 4; i++) {
+      current = firstValidCandidate(current, "ccw");
+    }
+    expect(current.x).toBe(originalX);
+    expect(current.y).toBe(originalY);
+    expect(current.rotation).toBe(0);
+  });
+});
+
+describe("Tetris rotation: four rotations restore the original orientation", () => {
+  it("four clockwise rotations of a T piece on an empty board return exactly to the start", () => {
+    let current = spawnPiece("T");
+    const original = current;
+    for (let i = 0; i < 4; i++) {
+      const next = getRotationCandidates(current, "cw").find((c) => canPlace(emptyBoard(), c));
+      expect(next).toBeDefined();
+      current = next!;
+    }
+    expect(current).toEqual(original);
+  });
+
+  it("four counter-clockwise rotations of an I piece on an empty board return exactly to the start", () => {
+    let current = spawnPiece("I");
+    const original = current;
+    for (let i = 0; i < 4; i++) {
+      const next = getRotationCandidates(current, "ccw").find((c) => canPlace(emptyBoard(), c));
+      expect(next).toBeDefined();
+      current = next!;
+    }
+    expect(current).toEqual(original);
+  });
+});
+
+describe("Tetris rotation + collision: rejection", () => {
+  /** Fills every cell except the piece's own current cells, so any rotation (which changes at least one occupied cell for a non-O piece) collides everywhere. */
+  function boardBoxingInPiece(piece: ActivePiece) {
+    const board = emptyBoard();
+    const keep = new Set(cellsForPiece(piece).map((c) => `${c.row},${c.col}`));
+    for (let row = 0; row < board.length; row++) {
+      for (let col = 0; col < board[row].length; col++) {
+        if (!keep.has(`${row},${col}`)) board[row][col] = "L";
+      }
+    }
+    return board;
+  }
+
+  it("a fully boxed-in piece rejects rotation — every SRS candidate collides", () => {
+    const piece: ActivePiece = { type: "T", rotation: 0, x: 3, y: 10 };
+    const board = boardBoxingInPiece(piece);
+    const candidates = getRotationCandidates(piece, "cw");
+    expect(candidates.every((c) => !canPlace(board, c))).toBe(true);
+  });
+
+  it("rejected rotation leaves the active piece's position AND rotation state completely unchanged (via TetrisGame)", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T"]));
+    let state = game.start(game.createInitialState());
+    // Box the current piece in, exactly as above, then attempt to rotate.
+    state = { ...state, board: boardBoxingInPiece(state.current!) };
+    const before = state;
+
+    const rejected = game.handleInput(state, { type: "rotateCw" });
+
+    expect(rejected.current).toEqual(before.current);
+    expect(rejected.board).toBe(before.board);
+  });
+});
+
+describe("Tetris rotation: SRS wall kicks (I piece's own kick table)", () => {
+  it("kicks off the left wall: a vertical I piece rotating to horizontal shifts right to fit", () => {
+    // rotation 1 (vertical, occupies column x+2) at x=-2 sits at column 0 —
+    // valid. Rotating to rotation 2 (horizontal, columns x..x+3) at the
+    // same x would need columns -2..1, which is off the left edge.
+    const piece: ActivePiece = { type: "I", rotation: 1, x: -2, y: 10 };
+    expect(canPlace(emptyBoard(), piece)).toBe(true);
+
+    const candidates = getRotationCandidates(piece, "cw");
+    const accepted = candidates.find((c) => canPlace(emptyBoard(), c));
+
+    expect(accepted).toEqual(candidates[2]); // third candidate: dx=+2
+    expect(accepted).toMatchObject({ rotation: 2, x: 0, y: 10 });
+  });
+
+  it("kicks off the right wall: a vertical I piece rotating to horizontal shifts left to fit", () => {
+    // rotation 3 (vertical, column x+1) at x=8 sits at column 9 — valid.
+    // Rotating (counter-clockwise, 3 -> 2) to horizontal at the same x
+    // would need columns 8..11, off the right edge (board is 10 wide).
+    const piece: ActivePiece = { type: "I", rotation: 3, x: 8, y: 10 };
+    expect(canPlace(emptyBoard(), piece)).toBe(true);
+
+    const candidates = getRotationCandidates(piece, "ccw");
+    const accepted = candidates.find((c) => canPlace(emptyBoard(), c));
+
+    expect(accepted).toEqual(candidates[1]); // second candidate: dx=-2
+    expect(accepted).toMatchObject({ rotation: 2, x: 6, y: 10 });
+  });
+});
+
+describe("Tetris rotation: SRS wall kicks (JLSTZ shared kick table)", () => {
+  it("kicks off the floor: a T piece rotating near the bottom shifts up to fit", () => {
+    const maxRow = TOTAL_HEIGHT - 1;
+    // rotation 0 at y = maxRow - 1: occupies rows (maxRow-1) and maxRow — resting exactly on the floor.
+    const piece: ActivePiece = { type: "T", rotation: 0, x: 3, y: maxRow - 1 };
+    expect(canPlace(emptyBoard(), piece)).toBe(true);
+
+    const candidates = getRotationCandidates(piece, "cw");
+    const accepted = candidates.find((c) => canPlace(emptyBoard(), c));
+
+    expect(accepted).toEqual(candidates[2]); // third candidate: dx=-1, dy=-1
+    expect(accepted).toMatchObject({ rotation: 1, x: 2, y: maxRow - 2 });
+  });
+
+  it("kicks around an existing locked block: a T piece rotating next to an obstruction shifts sideways to fit", () => {
+    const board = emptyBoard();
+    // (12,4) is occupied only by rotation 1's un-kicked candidate, not by
+    // rotation 0's own current cells — so the piece itself stays legally
+    // placed, but rotating in place (kick #1, dx=0) collides.
+    board[12][4] = "L";
+    const piece: ActivePiece = { type: "T", rotation: 0, x: 3, y: 10 };
+    expect(canPlace(board, piece)).toBe(true);
+
+    const candidates = getRotationCandidates(piece, "cw");
+    expect(canPlace(board, candidates[0])).toBe(false); // blocked by the locked cell
+    const accepted = candidates.find((c) => canPlace(board, c));
+
+    expect(accepted).toEqual(candidates[1]); // second candidate: dx=-1
+    expect(accepted).toMatchObject({ rotation: 1, x: 2, y: 10 });
+  });
+
+  it("near a board corner: a T piece at the bottom-left still finds a valid kick", () => {
+    const maxRow = TOTAL_HEIGHT - 1;
+    // rotation 2's lowest relative row is 2, so y = maxRow - 2 is the deepest legal position (resting on the floor) in the leftmost column.
+    const piece: ActivePiece = { type: "T", rotation: 2, x: 0, y: maxRow - 2 };
+    expect(canPlace(emptyBoard(), piece)).toBe(true);
+
+    const candidates = getRotationCandidates(piece, "ccw"); // 2 -> 1
+    const accepted = candidates.find((c) => canPlace(emptyBoard(), c));
+
+    expect(accepted).toBeDefined();
+    expect(accepted!.rotation).toBe(1);
+  });
+});
+
+describe("Tetris rotation: engine integration", () => {
+  it("a rotated piece can still move left/right/down afterward", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "rotateCw" });
+    expect(state.current?.rotation).toBe(1);
+
+    const rotatedX = state.current!.x;
+    const afterLeft = game.handleInput(state, { type: "moveLeft" });
+    expect(afterLeft.current?.x).toBe(rotatedX - 1);
+
+    const afterDown = game.handleInput(state, { type: "softDrop" });
+    expect(afterDown.current?.y).toBe(state.current!.y + 1);
+  });
+
+  it("a rotated piece can hard drop and locks correctly at the rotated shape", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "rotateCw" });
+    const rotatedPiece = state.current!;
+    const distance = getDropDistance(state.board, rotatedPiece);
+
+    const dropped = game.handleInput(state, { type: "hardDrop" });
+
+    expect(dropped.current?.type).toBe("L"); // next piece spawning still works
+    const lockedPiece: ActivePiece = { ...rotatedPiece, y: rotatedPiece.y + distance };
+    for (const cell of cellsForPiece(lockedPiece)) {
+      expect(dropped.board[cell.row][cell.col]).toBe("T");
+    }
+  });
+
+  it("game-over detection remains correct alongside rotation", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const board = emptyBoard();
+    for (const cell of cellsForPiece(spawnPiece("O"))) {
+      board[cell.row][cell.col] = "T";
+    }
+    const started = game.start({ ...game.createInitialState(), board });
+    expect(started.status).toBe("gameOver");
+
+    // Rotation after Game Over is exactly as inert as any other input.
+    const afterRotate = game.handleInput(started, { type: "rotateCw" });
+    expect(afterRotate).toEqual(started);
+  });
+});
+
+describe("Tetris rotation: regression — Phase A/B behavior is unaffected", () => {
+  it("movement, collision, and locking still work exactly as before rotation was added", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
+    let state = game.start(game.createInitialState());
+    expect(state.current?.type).toBe("I");
+    while (state.current?.type === "I") {
+      state = game.handleInput(state, { type: "softDrop" });
+    }
+    expect(state.current?.type).toBe("O");
+    expect(state.board[TOTAL_HEIGHT - 1].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
   });
 });
