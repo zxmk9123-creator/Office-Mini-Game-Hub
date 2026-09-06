@@ -77,6 +77,27 @@ describe("App navigation", () => {
     expect(await screen.findByPlaceholderText("Your nickname")).toBeTruthy();
   });
 
+  it("navigates to 도구 and shows Tetris as an available tool, gated behind a nickname", async () => {
+    render(<App />);
+    await screen.findAllByText("사명을 입력하시오.");
+    fireEvent.click(screen.getByRole("button", { name: "도구" }));
+    fireEvent.click(await screen.findByText("Tetris"));
+
+    expect(await screen.findByPlaceholderText("Your nickname")).toBeTruthy();
+  });
+
+  it("opens Tetris and shows its Start screen once a nickname exists", async () => {
+    localStorage.setItem("mini-game-hub:playerId", "p1");
+    localStorage.setItem("mini-game-hub:nickname", "Sanghyun");
+
+    render(<App />);
+    await screen.findAllByText("사명을 입력하시오.");
+    fireEvent.click(screen.getByRole("button", { name: "도구" }));
+    fireEvent.click(await screen.findByText("Tetris"));
+
+    expect(await screen.findByRole("button", { name: "Start" })).toBeTruthy();
+  });
+
   it("does not prompt for a nickname on the default 메모 view, only once Reaction Test or Sticky Notes is entered", async () => {
     render(<App />);
     await screen.findAllByText("사명을 입력하시오.");

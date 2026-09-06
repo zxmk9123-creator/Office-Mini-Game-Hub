@@ -8,9 +8,10 @@ import { usePlayerSession } from "./player/usePlayerSession";
 import { ReactionTestView } from "./games/reaction-test/ReactionTestView";
 import { SwipeBrickBreakerView } from "./games/swipe-brick-breaker/SwipeBrickBreakerView";
 import { MinesweeperView } from "./games/minesweeper/MinesweeperView";
+import { TetrisView } from "./games/tetris/TetrisView";
 
 type Section = "notes" | "sticky-notes" | "tools";
-type ToolScreen = "list" | "reaction-test" | "swipe-brick-breaker" | "minesweeper";
+type ToolScreen = "list" | "reaction-test" | "swipe-brick-breaker" | "minesweeper" | "tetris";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "notes", label: "메모" },
@@ -71,6 +72,14 @@ export default function App() {
     } else if (toolScreen === "minesweeper") {
       body = (
         <MinesweeperView
+          playerId={session.playerId}
+          nickname={session.nickname}
+          onHome={() => setToolScreen("list")}
+        />
+      );
+    } else if (toolScreen === "tetris") {
+      body = (
+        <TetrisView
           playerId={session.playerId}
           nickname={session.nickname}
           onHome={() => setToolScreen("list")}

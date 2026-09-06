@@ -1376,3 +1376,167 @@ describe("Tetris gravity + lock delay: regression — Phase A/B/C/D behavior is 
     }
   });
 });
+
+describe("Tetris scoring: line-clear score", () => {
+  /** Fills `board`'s bottom row entirely except columns 4-5 — exactly the gap a default-spawn O piece's hard drop fills. */
+  function almostFullBottomRow(board: ReturnType<typeof emptyBoard>) {
+    const bottomRow = TOTAL_HEIGHT - 1;
+    for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+      if (col !== 4 && col !== 5) board[bottomRow][col] = "L";
+    }
+  }
+
+  it("a single-line clear at level 1 scores 100 x level", () => {
+    const board = emptyBoard();
+    almostFullBottomRow(board);
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    const state = game.start({ ...game.createInitialState(), board });
+    const after = game.handleInput(state, { type: "hardDrop" });
+    expect(after.score).toBe(DEFAULT_TETRIS_RULESET.scoring.single * 1);
+    expect(after.lines).toBe(1);
+  });
+
+  it("a double-line clear scores 300 x level", () => {
+    const board = emptyBoard();
+    const bottomRow = TOTAL_HEIGHT - 1;
+    const secondFromBottom = TOTAL_HEIGHT - 2;
+    for (const row of [secondFromBottom, bottomRow]) {
+      for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+        if (col !== 4 && col !== 5) board[row][col] = "L";
+      }
+    }
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "T"]));
+    const state = game.start({ ...game.createInitialState(), board });
+    const after = game.handleInput(state, { type: "hardDrop" });
+    expect(after.score).toBe(DEFAULT_TETRIS_RULESET.scoring.double * 1);
+    expect(after.lines).toBe(2);
+  });
+
+  it("locking without completing any row scores nothing", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
+    let state = game.start(game.createInitialState());
+    state = dropAndLock(game, state);
+    expect(state.score).toBe(0);
+    expect(state.lines).toBe(0);
+  });
+
+  it("score accumulates across multiple clears rather than resetting each time", () => {
+    const board = emptyBoard();
+    almostFullBottomRow(board);
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "O", "T"]));
+    let state = game.start({ ...game.createInitialState(), board });
+    state = game.handleInput(state, { type: "hardDrop" }); // first single clear
+    const scoreAfterFirst = state.score;
+    expect(scoreAfterFirst).toBeGreaterThan(0);
+
+    almostFullBottomRow(state.board);
+    state = game.handleInput(state, { type: "hardDrop" }); // second single clear
+    expect(state.score).toBe(scoreAfterFirst * 2);
+    expect(state.lines).toBe(2);
+  });
+});
+
+describe("Tetris scoring: level progression every 10 lines", () => {
+  /** Clears exactly one line via a hard-dropped O piece and returns the resulting state. */
+  function clearOneLine(game: TetrisGame, state: TetrisState): TetrisState {
+    const board = state.board.map((row) => row.slice());
+    const bottomRow = TOTAL_HEIGHT - 1;
+    for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+      if (col !== 4 && col !== 5) board[bottomRow][col] = "L";
+    }
+    return game.handleInput({ ...state, board }, { type: "hardDrop" });
+  }
+
+  it("level stays 1 for the first 9 cleared lines", () => {
+    const pieces: PieceType[] = Array.from({ length: 10 }, () => "O");
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(pieces));
+    let state = game.start(game.createInitialState());
+    for (let i = 0; i < 9; i++) {
+      state = clearOneLine(game, state);
+    }
+    expect(state.lines).toBe(9);
+    expect(state.level).toBe(1);
+  });
+
+  it("clearing the 10th line advances to level 2", () => {
+    const pieces: PieceType[] = Array.from({ length: 11 }, () => "O");
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(pieces));
+    let state = game.start(game.createInitialState());
+    for (let i = 0; i < 10; i++) {
+      state = clearOneLine(game, state);
+    }
+    expect(state.lines).toBe(10);
+    expect(state.level).toBe(2);
+  });
+
+  it("a line-clear score awarded on the same lock that levels up still uses the PRE-level-up level", () => {
+    // The 10th cleared line both scores AND levels the player up in the
+    // same lockAndSpawnNext call — the score must use level 1 (the level
+    // in effect when the piece locked), not the just-reached level 2.
+    const pieces: PieceType[] = Array.from({ length: 11 }, () => "O");
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(pieces));
+    let state = game.start(game.createInitialState());
+    for (let i = 0; i < 9; i++) {
+      state = clearOneLine(game, state);
+    }
+    const scoreBeforeTenth = state.score;
+    state = clearOneLine(game, state);
+    expect(state.level).toBe(2);
+    expect(state.score - scoreBeforeTenth).toBe(DEFAULT_TETRIS_RULESET.scoring.single * 1);
+  });
+
+  it("gravity speeds up once the level increases (reuses Phase E's gravityIntervalMs)", () => {
+    const pieces: PieceType[] = Array.from({ length: 11 }, () => "O");
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(pieces));
+    let state = game.start(game.createInitialState());
+    for (let i = 0; i < 10; i++) {
+      state = clearOneLine(game, state);
+    }
+    expect(state.level).toBe(2);
+
+    const level1Interval = DEFAULT_TETRIS_RULESET.gravity[0];
+    const level2Interval = DEFAULT_TETRIS_RULESET.gravity[1];
+    expect(level2Interval).toBeLessThan(level1Interval);
+
+    // A tick just short of level 2's (shorter) interval should already move
+    // the piece down one row, proving the new, faster interval is in effect.
+    const startY = state.current!.y;
+    const afterTick = game.handleInput(state, { type: "tick", dtMs: level2Interval });
+    expect(afterTick.current!.y).toBe(startY + 1);
+  });
+});
+
+describe("Tetris scoring: reset on restart", () => {
+  it("createInitialState always starts at score 0, level 1, lines 0 regardless of a prior game's final state", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const fresh = game.createInitialState();
+    expect(fresh.score).toBe(0);
+    expect(fresh.level).toBe(1);
+    expect(fresh.lines).toBe(0);
+    expect(fresh.gravityAccumulator).toBe(0);
+    expect(fresh.lockElapsedMs).toBe(0);
+    expect(fresh.lockResetCount).toBe(0);
+  });
+
+  it("restarting (start() over a freshly created state) never carries over a previous playthrough's score/level/lines", () => {
+    const pieces: PieceType[] = Array.from({ length: 11 }, () => "O");
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(pieces));
+    const board = emptyBoard();
+    const bottomRow = TOTAL_HEIGHT - 1;
+    for (let col = 0; col < TETRIS_BOARD_WIDTH; col++) {
+      if (col !== 4 && col !== 5) board[bottomRow][col] = "L";
+    }
+    let state = game.start({ ...game.createInitialState(), board });
+    state = game.handleInput(state, { type: "hardDrop" });
+    expect(state.score).toBeGreaterThan(0);
+
+    // Simulate the platform boundary's restart: a fresh createInitialState() through start() again.
+    const restarted = game.start(game.createInitialState());
+    expect(restarted.score).toBe(0);
+    expect(restarted.level).toBe(1);
+    expect(restarted.lines).toBe(0);
+    expect(restarted.gravityAccumulator).toBe(0);
+    expect(restarted.lockElapsedMs).toBe(0);
+    expect(restarted.lockResetCount).toBe(0);
+  });
+});

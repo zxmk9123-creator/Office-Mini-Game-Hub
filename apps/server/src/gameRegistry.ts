@@ -3,6 +3,7 @@ import {
   MinesweeperGame,
   ReactionTestGame,
   SwipeBrickBreakerGame,
+  TetrisGame,
   type Clock,
 } from "@mini-game-hub/game-core";
 
@@ -34,6 +35,7 @@ export function getGameRegistry(): GameRegistry {
     registry.register(new MinesweeperGame("easy", new SystemClock()));
     registry.register(new MinesweeperGame("normal", new SystemClock()));
     registry.register(new MinesweeperGame("hard", new SystemClock()));
+    registry.register(new TetrisGame(new SystemClock()));
   }
   return registry;
 }

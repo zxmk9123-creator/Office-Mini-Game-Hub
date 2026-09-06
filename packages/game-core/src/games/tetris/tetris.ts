@@ -1,7 +1,7 @@
 import type { Game, GameMetadata, GameResult } from "../../types";
 import type { Clock } from "../reaction-test/types";
 import { canPlace, getDropDistance } from "./collision";
-import { clearCompletedRows, createEmptyBoard, mergePieceIntoBoard } from "./board";
+import { clearCompletedRows, createEmptyBoard, getCompletedRows, mergePieceIntoBoard } from "./board";
 import { MathRandomSource, SevenBagGenerator, type BagSource } from "./generator";
 import { gravityIntervalMs } from "./gravity";
 import { spawnPiece } from "./pieces";
@@ -18,13 +18,15 @@ import type { ActivePiece, TetrisInput, TetrisResultMetadata, TetrisRuleset, Tet
 const PREVIEW_COUNT = 3;
 
 /**
- * Phase A-E: spawn, left/right/soft-drop/hard-drop movement, collision,
- * locking, game-over detection, SRS rotation with wall kicks (rotation.ts),
- * line clearing (board.ts), and time-driven gravity + Classic-style lock
- * delay (gravity.ts + the "tick" input). Scoring, level progression, and
- * gravity acceleration by level are later phases — `pause`/`restart` are
- * accepted (the Game contract must handle every declared TetrisInput) but
- * remain no-ops for now.
+ * Phase A-F (MVP): spawn, left/right/soft-drop/hard-drop movement,
+ * collision, locking, game-over detection, SRS rotation with wall kicks
+ * (rotation.ts), line clearing (board.ts), time-driven gravity +
+ * Classic-style lock delay (gravity.ts + the "tick" input), and
+ * Classic-style score/level progression (scoreForClear + lockAndSpawnNext).
+ * `pause`/`restart` are accepted (the Game contract must handle every
+ * declared TetrisInput) but remain no-ops — restart is handled at the
+ * platform boundary via GameSession.reset()/start(), same as every other
+ * game.
  */
 export const tetrisMetadata: GameMetadata = {
   id: "tetris",
@@ -33,9 +35,7 @@ export const tetrisMetadata: GameMetadata = {
   icon: "tetris",
   scoreType: "higher_is_better",
   version: "0.1.0",
-  // Not yet registered in gameRegistry.ts — flip once session/result/
-  // ranking integration (a later phase) actually lands.
-  enabled: false,
+  enabled: true,
 };
 
 /**
@@ -258,22 +258,45 @@ export class TetrisGame implements Game<TetrisState, TetrisInput, TetrisResultMe
   }
 
   /**
-   * Piece Lock -> Merge Piece -> Find/Clear Full Rows -> Spawn Next Piece
-   * -> Check Game Over. clearCompletedRows() removes every completed row
-   * (single/double/triple/Tetris, or any non-consecutive combination of
-   * them) as one atomic step and is a no-op when nothing is complete.
-   * Gravity/lock-delay timing is always reset to a clean slate here — the
-   * newly spawned piece (or Game Over) never inherits the just-locked
-   * piece's leftover timing state. Scoring, the lines counter, and level
-   * updates are still a later phase; only the board itself changes here.
+   * Classic-style line-clear score, multiplied by the level in effect at
+   * the moment of the clear (before any level-up this same clear causes) —
+   * 1/2/3/4 lines map to single/double/triple/tetris in the ruleset's
+   * scoring table; clearing 0 lines scores nothing.
+   */
+  private scoreForClear(clearedCount: number, level: number): number {
+    const { single, double, triple, tetris } = this.ruleset.scoring;
+    const perLine = [0, single, double, triple, tetris][clearedCount] ?? tetris;
+    return perLine * level;
+  }
+
+  /**
+   * Piece Lock -> Merge Piece -> Find/Clear Full Rows -> Score/Level ->
+   * Spawn Next Piece -> Check Game Over. clearCompletedRows() removes every
+   * completed row (single/double/triple/Tetris, or any non-consecutive
+   * combination of them) as one atomic step and is a no-op when nothing is
+   * complete. Score uses the Classic-style table (see scoreForClear); level
+   * is derived directly from the total lines cleared (1 + lines /
+   * linesPerLevel) rather than tracked separately, so it can never drift
+   * out of sync. A level-up takes effect on the very next "tick" via
+   * gravityIntervalMs(ruleset, level) — no separate wiring needed. Gravity/
+   * lock-delay timing is always reset to a clean slate here — the newly
+   * spawned piece (or Game Over) never inherits the just-locked piece's
+   * leftover timing state.
    */
   private lockAndSpawnNext(state: TetrisState, piece: ActivePiece): TetrisState {
     const merged = mergePieceIntoBoard(state.board, piece);
+    const clearedCount = getCompletedRows(merged).length;
     const board = clearCompletedRows(merged);
+    const score = state.score + this.scoreForClear(clearedCount, state.level);
+    const lines = state.lines + clearedCount;
+    const level = 1 + Math.floor(lines / this.ruleset.linesPerLevel);
     const reset: TetrisState = {
       ...state,
       board,
       current: null,
+      score,
+      lines,
+      level,
       gravityAccumulator: 0,
       lockElapsedMs: 0,
       lockResetCount: 0,
