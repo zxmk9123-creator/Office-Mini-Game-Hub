@@ -157,9 +157,17 @@ export function useMinesweeperSession(playerId: string | null) {
     (row: number, col: number) => {
       if (session.lifecycleState !== "playing") return;
       session.submitInput({ type: "toggleFlag", row, col });
+      // Flagging every mine can itself finish the game (Clear) — same
+      // post-input finished check as reveal(), otherwise a flag-triggered
+      // Clear would never compute/submit a result or show the ranking.
+      const lifecycleStateAfterInput = session.lifecycleState as GameLifecycleState;
+      if (lifecycleStateAfterInput === "finished") {
+        void submitFinished();
+        return;
+      }
       sync();
     },
-    [session, sync],
+    [session, sync, submitFinished],
   );
 
   const reset = useCallback(() => {
