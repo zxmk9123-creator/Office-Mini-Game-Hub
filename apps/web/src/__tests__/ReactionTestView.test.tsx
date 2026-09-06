@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReactionTestView } from "../games/reaction-test/ReactionTestView";
 import * as sessionModule from "../games/reaction-test/useReactionTestSession";
+import { getRanking } from "../api/client";
 
 vi.mock("../games/reaction-test/useReactionTestSession");
 vi.mock("../api/client", () => ({
@@ -13,6 +14,7 @@ vi.mock("../api/client", () => ({
 }));
 
 const useReactionTestSession = vi.mocked(sessionModule.useReactionTestSession);
+const mockedGetRanking = vi.mocked(getRanking);
 
 function baseView(overrides: Partial<ReturnType<typeof sessionModule.useReactionTestSession>> = {}) {
   return {
@@ -114,11 +116,12 @@ describe("ReactionTestView", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onHome when Home is clicked", () => {
+  it("calls onHome when Home is clicked", async () => {
     const onHome = vi.fn();
     useReactionTestSession.mockReturnValue(baseView());
 
     render(<ReactionTestView playerId="p1" nickname="Sanghyun" onHome={onHome} />);
+    await screen.findByText(/Top \d/); // let the idle-screen leaderboard fetch settle first
     screen.getByRole("button", { name: "← Home" }).click();
 
     expect(onHome).toHaveBeenCalledTimes(1);
@@ -152,5 +155,20 @@ describe("ReactionTestView", () => {
 
     expect(screen.getByText(/too early/i)).toBeTruthy();
     expect(screen.queryByText(/Top \d/)).toBeNull();
+  });
+
+  it("shows today's Top 10 on the idle (Start) screen, before any round is played", async () => {
+    mockedGetRanking.mockResolvedValueOnce({
+      game: { id: "reaction-test", name: "Reaction Test", scoreType: "lower_is_better" },
+      entries: [{ rank: 1, playerId: "p1", nickname: "Alice", score: 210, metadata: {}, completedAt: "" }],
+      pagination: { limit: 10, offset: 0, total: 1 },
+    });
+    useReactionTestSession.mockReturnValue(baseView());
+
+    render(<ReactionTestView playerId="p1" nickname="Sanghyun" onHome={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start" })).toBeTruthy();
+    expect(await screen.findByText(/Alice/)).toBeTruthy();
+    expect(screen.getByText(/Today's Top 10/)).toBeTruthy();
   });
 });

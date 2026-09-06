@@ -116,6 +116,24 @@ export function MinesweeperView({
         >
           Start
         </button>
+        {/*
+          Keyed by `difficulty` (both the leaderboard's gameId AND its
+          refreshKey) so switching Easy/Normal/Hard above immediately
+          swaps in that mode's own Top 10 — each difficulty is a fully
+          separate ranked game (see minesweeperMetadataFor), never a
+          shared/merged one.
+        */}
+        <div className="mt-2 w-full max-w-xs border-t border-neutral-100 pt-3">
+          <p className="mb-1 text-xs text-neutral-400">
+            Today&apos;s Top 10 ({DIFFICULTY_OPTIONS.find((d) => d.id === difficulty)?.label})
+          </p>
+          <Leaderboard
+            gameId={gameId}
+            playerId={playerId}
+            refreshKey={difficulty}
+            formatScore={(score) => formatElapsed(score)}
+          />
+        </div>
       </div>
     );
   }

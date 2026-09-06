@@ -64,6 +64,10 @@ export function ReactionTestView({
         >
           Start
         </button>
+        <div className="mt-2 w-full max-w-xs border-t border-neutral-100 pt-3">
+          <p className="mb-1 text-xs text-neutral-400">Today&apos;s Top 10</p>
+          <Leaderboard gameId={GAME_ID} playerId={playerId} refreshKey="idle" />
+        </div>
       </div>
     );
   }

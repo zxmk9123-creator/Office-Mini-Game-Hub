@@ -176,6 +176,36 @@ future game requires no ranking code changes, only registering it (see `gameRegi
   (`playerRank`), independent of the current page — a display convenience, not an auth mechanism
   (there is no login).
 
+### UI convention: ranking is always visible, not just after playing
+
+Every game view's **idle (Start) screen** renders that game's `Leaderboard` (Top 10), not only the
+post-game result screen — the player can check today's standings before ever pressing Start. Concretely,
+for a new game's `<GameName>View.tsx`:
+
+```tsx
+<div className="mt-2 w-full max-w-xs border-t border-neutral-100 pt-3">
+  <p className="mb-1 text-xs text-neutral-400">Today&apos;s Top 10</p>
+  <Leaderboard gameId={GAME_ID} playerId={playerId} refreshKey="idle" />
+</div>
+```
+
+- **A game with multiple modes/difficulties** — each its own registered `gameId`/`GameMetadata`, the
+  way Minesweeper registers Easy/Normal/Hard as `minesweeper-easy`/`minesweeper-normal`/
+  `minesweeper-hard` in `gameRegistry.ts` — must key the idle screen's `Leaderboard` by the currently
+  selected mode, on **both** `gameId` and `refreshKey`, so switching modes immediately swaps in that
+  mode's own ranking without a full remount:
+  ```tsx
+  <Leaderboard gameId={`my-game-${mode}`} playerId={playerId} refreshKey={mode} ... />
+  ```
+- **The result screen's leaderboard is never gated on success.** A failed/incomplete attempt still
+  calls `submitGameResult` (score `null`, `completion.reason: "invalid"` — see `validateGameResult`),
+  which the ranking query already excludes on its own; the UI should render the leaderboard whenever
+  `submissionStatus === "saved" && persistedResult`, regardless of whether the attempt itself succeeded.
+  A failure must never be a dead end with only Restart/Home and no ranking in sight.
+- Pass a `formatScore` prop to `Leaderboard` when the raw stored number needs game-specific display
+  (e.g. Minesweeper stores/ranks by raw milliseconds but displays `M:SS`) — never store a
+  pre-formatted string; the ranking comparison itself must stay on the raw number.
+
 ## Stack
 
 React · TypeScript · Vite · Tailwind CSS · Node.js · Express · PostgreSQL · Drizzle ORM · Zod
