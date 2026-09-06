@@ -1,9 +1,11 @@
-// Phase A only: types, ruleset/constants, piece shape data, board
-// primitives, and the injectable 7-bag generator + peekable queue.
-// TetrisGame (the Game contract implementation), collision, rotation
-// (SRS + wall kicks), scoring, level, and gravity/time are later phases —
-// not implemented yet, and this module is intentionally NOT registered in
-// gameRegistry.ts until they are.
+// Phase A + B: types, ruleset/constants, piece shape data, board
+// primitives + locking, the injectable 7-bag generator + peekable queue,
+// collision/drop-distance, and TetrisGame itself covering spawn/movement/
+// collision/locking/game-over. Rotation (SRS + wall kicks), scoring, line
+// clearing, level progression, and gravity/time are later phases — their
+// TetrisInput variants exist but are no-ops in TetrisGame until then, and
+// this module is intentionally NOT registered in gameRegistry.ts until
+// session/result/ranking integration is done too.
 
 export {
   PIECE_TYPES,
@@ -33,7 +35,9 @@ export {
 
 export { SPAWN_X, SPAWN_Y, spawnPiece, cellsForPiece, createEmptyBoard } from "./pieces";
 
-export { boardWidth, boardHeight, isInBounds, getCell, isCellEmpty } from "./board";
+export { boardWidth, boardHeight, isInBounds, getCell, isCellEmpty, mergePieceIntoBoard } from "./board";
+
+export { canPlace, getDropDistance } from "./collision";
 
 export {
   MathRandomSource,
@@ -44,3 +48,5 @@ export {
 } from "./generator";
 
 export { PieceQueue, type PieceGenerator } from "./queue";
+
+export { TetrisGame, tetrisMetadata } from "./tetris";

@@ -9,20 +9,39 @@ import {
   TETRIS_BUFFER_ROWS,
   TETRIS_SPAWN_X,
   TETRIS_SPAWN_Y,
+  TetrisGame,
+  canPlace,
   cellsForPiece,
   createEmptyTetrisBoard,
+  getDropDistance,
   getTetrisCell,
   isTetrisCellEmpty,
   isTetrisCellInBounds,
+  mergePieceIntoBoard,
   shuffledBag,
   spawnPiece,
   tetrisBoardHeight,
   tetrisBoardWidth,
+  type ActivePiece,
+  type Clock,
   type PieceType,
   type Rotation,
   type TetrisBagSource,
   type TetrisRandomSource,
 } from "..";
+
+class FixedClock implements Clock {
+  constructor(private t = 0) {}
+  now(): number {
+    return this.t;
+  }
+}
+
+const TOTAL_HEIGHT = TETRIS_BUFFER_ROWS + TETRIS_BOARD_HEIGHT;
+
+function emptyBoard() {
+  return createEmptyTetrisBoard(TETRIS_BOARD_WIDTH, TOTAL_HEIGHT);
+}
 
 /** Deterministic sequence source for reproducible shuffle tests. */
 class SequenceRandomSource implements TetrisRandomSource {
@@ -230,5 +249,301 @@ describe("Tetris piece queue: next()/peek()", () => {
 
     const drawn = Array.from({ length: 14 }, () => queue.next());
     expect(drawn).toEqual(preview);
+  });
+});
+
+describe("Tetris board: mergePieceIntoBoard (pure)", () => {
+  it("stamps every one of the piece's cells with its type, without mutating the input board", () => {
+    const board = emptyBoard();
+    const piece: ActivePiece = { type: "T", rotation: 0, x: 3, y: 0 };
+    const merged = mergePieceIntoBoard(board, piece);
+
+    for (const cell of cellsForPiece(piece)) {
+      expect(merged[cell.row][cell.col]).toBe("T");
+    }
+    // The original board is untouched — an immutable update, like every other game's board mutation.
+    expect(board.every((row) => row.every((c) => c === null))).toBe(true);
+  });
+});
+
+describe("Tetris collision: canPlace", () => {
+  it("allows any valid spawn position on an empty board", () => {
+    for (const type of PIECE_TYPES) {
+      expect(canPlace(emptyBoard(), spawnPiece(type))).toBe(true);
+    }
+  });
+
+  it("rejects a piece hanging off the left wall", () => {
+    // O at x=-2: columns would be -1 and 0 — one cell off the left edge.
+    expect(canPlace(emptyBoard(), { type: "O", rotation: 0, x: -2, y: 0 })).toBe(false);
+    // x=-1 (columns 0,1) is still fully in bounds.
+    expect(canPlace(emptyBoard(), { type: "O", rotation: 0, x: -1, y: 0 })).toBe(true);
+  });
+
+  it("rejects a piece hanging off the right wall", () => {
+    // O at x=8: columns would be 9 and 10 — one cell off the right edge (board is 10 wide, cols 0-9).
+    expect(canPlace(emptyBoard(), { type: "O", rotation: 0, x: 8, y: 0 })).toBe(false);
+    expect(canPlace(emptyBoard(), { type: "O", rotation: 0, x: 7, y: 0 })).toBe(true);
+  });
+
+  it("rejects a piece extending below the floor", () => {
+    // O's lowest occupied row is y+2; the last valid row index is TOTAL_HEIGHT - 1, so the max valid y is TOTAL_HEIGHT - 3.
+    const maxValidY = TOTAL_HEIGHT - 3;
+    expect(canPlace(emptyBoard(), { type: "O", rotation: 0, x: 0, y: maxValidY })).toBe(true);
+    expect(canPlace(emptyBoard(), { type: "O", rotation: 0, x: 0, y: maxValidY + 1 })).toBe(false);
+  });
+
+  it("rejects overlapping an already-occupied cell", () => {
+    const board = emptyBoard();
+    board[5][4] = "L"; // arbitrary previously-locked cell
+    // T at (x=3,y=4): occupies (4,4),(5,3),(5,4),(5,5) — overlaps the locked cell at (5,4).
+    expect(canPlace(board, { type: "T", rotation: 0, x: 3, y: 4 })).toBe(false);
+  });
+
+  it("allows a valid placement directly above occupied cells, as long as it doesn't overlap them", () => {
+    const board = emptyBoard();
+    board[10][4] = "L";
+    board[10][5] = "L";
+    // O at (x=4, y=8) occupies rows 9-10... still overlaps row 10. Move one row higher to just clear it.
+    expect(canPlace(board, { type: "O", rotation: 0, x: 4, y: 8 })).toBe(false);
+    expect(canPlace(board, { type: "O", rotation: 0, x: 4, y: 7 })).toBe(true);
+  });
+});
+
+describe("Tetris collision: getDropDistance", () => {
+  it("is 0 when the piece is already resting on the floor", () => {
+    const board = emptyBoard();
+    const resting: ActivePiece = { type: "O", rotation: 0, x: 0, y: TOTAL_HEIGHT - 3 };
+    expect(canPlace(board, resting)).toBe(true);
+    expect(getDropDistance(board, resting)).toBe(0);
+  });
+
+  it("matches manual reasoning for a T piece dropped from spawn on an empty board", () => {
+    const distance = getDropDistance(emptyBoard(), spawnPiece("T"));
+    // T's lowest relative row is 1; it can fall until that row reaches TOTAL_HEIGHT - 1.
+    expect(distance).toBe(TOTAL_HEIGHT - 1 - 1 - TETRIS_SPAWN_Y);
+  });
+
+  it("stops exactly above an obstruction below the piece", () => {
+    const board = emptyBoard();
+    board[15][4] = "L";
+    board[15][5] = "L";
+    const distance = getDropDistance(board, { type: "O", rotation: 0, x: 4, y: 0 });
+    // O's lowest relative row is 2; it must stop with that row landing on row 14 (just above the obstruction at row 15).
+    expect(distance).toBe(14 - 2);
+  });
+});
+
+describe("Tetris engine: movement", () => {
+  function started(sequence: PieceType[]) {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(sequence));
+    const state = game.start(game.createInitialState());
+    return { game, state };
+  }
+
+  it("moves left from a valid position", () => {
+    const { game, state } = started(["O"]);
+    const moved = game.handleInput(state, { type: "moveLeft" });
+    expect(moved.current?.x).toBe(state.current!.x - 1);
+    expect(moved.current?.y).toBe(state.current!.y);
+  });
+
+  it("moves right from a valid position", () => {
+    const { game, state } = started(["O"]);
+    const moved = game.handleInput(state, { type: "moveRight" });
+    expect(moved.current?.x).toBe(state.current!.x + 1);
+  });
+
+  it("moves down (soft drop) from a valid position", () => {
+    const { game, state } = started(["O"]);
+    const moved = game.handleInput(state, { type: "softDrop" });
+    expect(moved.current?.y).toBe(state.current!.y + 1);
+    expect(moved.current?.x).toBe(state.current!.x);
+    expect(moved.status).toBe("playing");
+  });
+
+  it("the left wall blocks further leftward movement — position and board stop changing", () => {
+    const { game } = started(["O"]);
+    let state = game.start(new TetrisGame(new FixedClock(), new FixedBagSource(["O"])).createInitialState());
+    for (let i = 0; i < 20; i++) {
+      state = game.handleInput(state, { type: "moveLeft" });
+    }
+    const stoppedAt = state.current!.x;
+    const boardBefore = state.board;
+    const again = game.handleInput(state, { type: "moveLeft" });
+    expect(again.current!.x).toBe(stoppedAt);
+    expect(again.board).toBe(boardBefore); // untouched — same reference, not just equal
+  });
+
+  it("the right wall blocks further rightward movement", () => {
+    const { game, state: s0 } = started(["O"]);
+    let state = s0;
+    for (let i = 0; i < 20; i++) {
+      state = game.handleInput(state, { type: "moveRight" });
+    }
+    const stoppedAt = state.current!.x;
+    const again = game.handleInput(state, { type: "moveRight" });
+    expect(again.current!.x).toBe(stoppedAt);
+  });
+
+  it("invalid movement never mutates the board and never moves the piece", () => {
+    const { game, state } = started(["O"]);
+    // Drive all the way to the left wall first.
+    let atWall = state;
+    for (let i = 0; i < 20; i++) {
+      atWall = game.handleInput(atWall, { type: "moveLeft" });
+    }
+    const before = atWall;
+    const rejected = game.handleInput(atWall, { type: "moveLeft" });
+    expect(rejected.current).toEqual(before.current);
+    expect(rejected.board).toBe(before.board);
+  });
+});
+
+describe("Tetris engine: piece locking", () => {
+  it("blocked downward movement (floor) locks the piece in place", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
+    let state = game.start(game.createInitialState());
+    expect(state.current?.type).toBe("I");
+
+    while (state.current?.type === "I") {
+      state = game.handleInput(state, { type: "softDrop" });
+    }
+
+    // The lock happened, and the next piece from the sequence spawned.
+    expect(state.current?.type).toBe("O");
+    expect(state.status).toBe("playing");
+  });
+
+  it("the locked piece becomes part of the board, at the floor", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "O"]));
+    let state = game.start(game.createInitialState());
+    while (state.current?.type === "I") {
+      state = game.handleInput(state, { type: "softDrop" });
+    }
+    const bottomRow = TOTAL_HEIGHT - 1;
+    expect(state.board[bottomRow].slice(3, 7)).toEqual(["I", "I", "I", "I"]);
+  });
+
+  it("locked cells preserve the piece's type", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["L", "O"]));
+    let state = game.start(game.createInitialState());
+    while (state.current?.type === "L") {
+      state = game.handleInput(state, { type: "softDrop" });
+    }
+    const lockedCells = state.board.flatMap((row) => row.filter((c) => c !== null));
+    expect(lockedCells.every((c) => c === "L")).toBe(true);
+    expect(lockedCells).toHaveLength(4);
+  });
+
+  it("a next piece is spawned immediately after locking, from the injected sequence", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I", "S", "Z"]));
+    let state = game.start(game.createInitialState());
+    while (state.current?.type === "I") {
+      state = game.handleInput(state, { type: "softDrop" });
+    }
+    expect(state.current?.type).toBe("S");
+    expect(state.next[0]).toBe("Z");
+  });
+});
+
+describe("Tetris engine: hard drop", () => {
+  it("moves the piece straight to the lowest valid position and locks it immediately, in one input", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+    const state = game.start(game.createInitialState());
+    const expectedDistance = getDropDistance(state.board, state.current!);
+
+    const dropped = game.handleInput(state, { type: "hardDrop" });
+
+    // Locked immediately: the active piece is already the NEXT piece, not "T" resting at the bottom.
+    expect(dropped.current?.type).toBe("L");
+    expect(dropped.status).toBe("playing");
+
+    const expectedLockedPiece: ActivePiece = { ...state.current!, y: state.current!.y + expectedDistance };
+    for (const cell of cellsForPiece(expectedLockedPiece)) {
+      expect(dropped.board[cell.row][cell.col]).toBe("T");
+    }
+  });
+
+  it("produces a fully deterministic board for the same setup", () => {
+    const run = () => {
+      const game = new TetrisGame(new FixedClock(), new FixedBagSource(["T", "L"]));
+      const state = game.start(game.createInitialState());
+      return game.handleInput(state, { type: "hardDrop" });
+    };
+    expect(run().board).toEqual(run().board);
+  });
+
+  it("hard-dropping onto an existing stack stops exactly on top of it", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O", "O"]));
+    let state = game.start(game.createInitialState());
+    state = game.handleInput(state, { type: "hardDrop" }); // first O settles on the floor
+    const secondDropped = game.handleInput(state, { type: "hardDrop" }); // second O settles on top of the first
+
+    // Same column both times (O never moves horizontally here), so the
+    // second piece must stack directly on top of the first: 4 total rows
+    // with exactly 2 "O" cells each, none of them overlapping.
+    const rows = [TOTAL_HEIGHT - 1, TOTAL_HEIGHT - 2, TOTAL_HEIGHT - 3, TOTAL_HEIGHT - 4];
+    for (const row of rows) {
+      expect(secondDropped.board[row].filter((c) => c === "O")).toHaveLength(2);
+    }
+    expect(secondDropped.board.flat().filter((c) => c === "O")).toHaveLength(8);
+  });
+});
+
+describe("Tetris engine: game over", () => {
+  it("a valid spawn continues the game in 'playing' status", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["I"]));
+    const state = game.start(game.createInitialState());
+    expect(state.status).toBe("playing");
+    expect(state.current).not.toBeNull();
+  });
+
+  it("a blocked spawn transitions to 'gameOver' without overwriting the existing board", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const board = emptyBoard();
+    // Pre-occupy exactly where the O piece would spawn (rows 1-2, cols 4-5).
+    for (const cell of cellsForPiece(spawnPiece("O"))) {
+      board[cell.row][cell.col] = "T";
+    }
+    const initial = { ...game.createInitialState(), board };
+
+    const started = game.start(initial);
+
+    expect(started.status).toBe("gameOver");
+    expect(started.current).toBeNull();
+    // The board is exactly what it was — nothing was merged/overwritten on a failed spawn.
+    expect(started.board).toEqual(board);
+  });
+
+  it("no further movement is possible once the game is over — status/board stay put", () => {
+    const game = new TetrisGame(new FixedClock(), new FixedBagSource(["O"]));
+    const board = emptyBoard();
+    for (const cell of cellsForPiece(spawnPiece("O"))) {
+      board[cell.row][cell.col] = "T";
+    }
+    const gameOverState = game.start({ ...game.createInitialState(), board });
+
+    const afterMove = game.handleInput(gameOverState, { type: "moveLeft" });
+    expect(afterMove).toEqual(gameOverState);
+  });
+});
+
+describe("Tetris engine: regression — Phase A behavior is unaffected", () => {
+  it("the engine's spawn sequence matches what the queue previewed, across several consecutive locks", () => {
+    // Repeatedly hard-dropping at the same spawn column with no line
+    // clearing yet (a later phase) will eventually stack up to a real
+    // Game Over — that's expected engine behavior, not a bug, so this
+    // stops checking the moment that happens rather than assuming a
+    // fixed number of pieces always fit.
+    const game = new TetrisGame(new FixedClock(), new SevenBagGenerator(new SequenceRandomSource([0.2, 0.4, 0.6, 0.8, 0.1, 0.9])));
+    let state = game.start(game.createInitialState());
+    for (let i = 0; i < 5 && state.current; i++) {
+      const predictedNext = state.next[0];
+      state = game.handleInput(state, { type: "hardDrop" });
+      if (state.current) {
+        expect(state.current.type).toBe(predictedNext);
+      }
+    }
   });
 });
