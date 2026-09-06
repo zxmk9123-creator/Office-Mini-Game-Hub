@@ -90,4 +90,31 @@ describe("Leaderboard", () => {
     await screen.findByText(/Alice/);
     expect(screen.getAllByText(/Alice/)).toHaveLength(1);
   });
+
+  it("uses a custom formatScore instead of the plain '<score> ms' default, e.g. for a time-attack game's M:SS display", async () => {
+    mockedGetRanking.mockResolvedValue({
+      game: { id: "minesweeper-easy", name: "Minesweeper (Easy)", scoreType: "lower_is_better" },
+      entries: [{ rank: 1, playerId: "p1", nickname: "Alice", score: 65000, metadata: {}, completedAt: "" }],
+      pagination: { limit: 1, offset: 0, total: 1 },
+    });
+
+    render(
+      <Leaderboard
+        gameId="minesweeper-easy"
+        playerId={null}
+        refreshKey={1}
+        limit={1}
+        formatScore={(score) => {
+          const totalSeconds = Math.floor(score / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+        }}
+      />,
+    );
+
+    expect(await screen.findByText("01:05")).toBeTruthy();
+    expect(screen.queryByText(/65000/)).toBeNull();
+    expect(screen.queryByText(/ms/)).toBeNull();
+  });
 });

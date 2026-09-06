@@ -14,11 +14,16 @@ export function Leaderboard({
   playerId,
   refreshKey,
   limit = DEFAULT_LEADERBOARD_LIMIT,
+  formatScore,
 }: {
   gameId: string;
   playerId: string | null;
   refreshKey: string | number;
   limit?: number;
+  /** Overrides how a raw score number is displayed (e.g. ms -> "M:SS" for a
+   * time-attack game like Minesweeper). Defaults to the plain `${score} ms`
+   * used by Reaction Test. */
+  formatScore?: (score: number, scoreType: RankingDto["game"]["scoreType"]) => string;
 }) {
   const [ranking, setRanking] = useState<RankingDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +67,7 @@ export function Leaderboard({
   }
 
   const unit = ranking.game.scoreType === "lower_is_better" ? " ms" : "";
+  const format = formatScore ?? ((score: number) => `${score}${unit}`);
   const playerInTop = ranking.playerRank && ranking.playerRank.rank <= limit;
 
   return (
@@ -84,10 +90,7 @@ export function Leaderboard({
                 {entry.rank}. {entry.nickname}
                 {isCurrentPlayer && <span className="ml-1 text-xs font-normal text-neutral-500">(you)</span>}
               </span>
-              <span>
-                {entry.score}
-                {unit}
-              </span>
+              <span>{format(entry.score, ranking.game.scoreType)}</span>
             </li>
           );
         })}
@@ -98,10 +101,7 @@ export function Leaderboard({
             {ranking.playerRank.rank}. {ranking.playerRank.nickname}
             <span className="ml-1 text-xs font-normal text-neutral-500">(you)</span>
           </span>
-          <span>
-            {ranking.playerRank.score}
-            {unit}
-          </span>
+          <span>{format(ranking.playerRank.score, ranking.game.scoreType)}</span>
         </p>
       )}
     </div>
