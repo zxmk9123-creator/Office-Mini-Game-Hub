@@ -151,14 +151,21 @@ export function MinesweeperView({
             Home
           </button>
         </div>
+        {/*
+          Shown after ANY outcome, not just Clear — a failed attempt still
+          submits a result (score null, excluded from ranking itself), and
+          the player should still be able to see where today's Top 10
+          stands, not just get shoved straight back to Restart/Home.
+        */}
         {submissionStatus === "saved" && persistedResult && (
           <div className="mt-3 w-full border-t border-neutral-100 pt-3">
-            <p className="mb-1 text-xs text-neutral-400">Today&apos;s Best ({DIFFICULTY_OPTIONS.find((d) => d.id === difficulty)?.label})</p>
+            <p className="mb-1 text-xs text-neutral-400">
+              Today&apos;s Top 10 ({DIFFICULTY_OPTIONS.find((d) => d.id === difficulty)?.label})
+            </p>
             <Leaderboard
               gameId={gameId}
               playerId={playerId}
               refreshKey={persistedResult.id}
-              limit={1}
               formatScore={(score) => formatElapsed(score)}
             />
           </div>
