@@ -344,6 +344,83 @@ describe("Minesweeper: Clear (all safe cells revealed)", () => {
   });
 });
 
+describe("Minesweeper: Clear via flagging every mine (no full reveal required)", () => {
+  it("flagging exactly the mine cells clears the game even with safe cells still hidden", () => {
+    const clock = new FixedClock(0);
+    const { game, state: s0 } = newGame("easy", clock);
+    const afterFirst = game.handleInput(s0, { type: "reveal", row: 0, col: 0 });
+    const mineIndices = afterFirst.cells.map((c, i) => (c.mine ? i : -1)).filter((i) => i >= 0);
+    expect(mineIndices).toHaveLength(afterFirst.mineCount);
+
+    clock.advance(4242);
+    let state = afterFirst;
+    for (const idx of mineIndices) {
+      const row = Math.floor(idx / state.width);
+      const col = idx % state.width;
+      state = game.handleInput(state, { type: "toggleFlag", row, col });
+    }
+
+    expect(state.phase).toBe("cleared");
+    expect(state.endedAtMs).toBe(4242);
+    expect(state.flagCount).toBe(state.mineCount);
+    // Not every safe cell needed to be revealed for this to count as Clear.
+    const totalSafe = state.width * state.height - state.mineCount;
+    expect(state.revealedSafeCount).toBeLessThan(totalSafe);
+
+    const result = game.computeResult(state);
+    expect(result.completion.reason).toBe("completed");
+    expect(result.score).toBe(4242);
+  });
+
+  it("does not clear if a wrong (non-mine) cell is flagged, even once the flag count matches the mine count", () => {
+    const { game, state: s0 } = newGame("easy");
+    const afterFirst = game.handleInput(s0, { type: "reveal", row: 0, col: 0 });
+    const mineIndices = afterFirst.cells.map((c, i) => (c.mine ? i : -1)).filter((i) => i >= 0);
+    const wrongIndex = afterFirst.cells.findIndex((c, i) => !c.mine && afterFirst.cells[i].state === "hidden");
+    expect(wrongIndex).toBeGreaterThanOrEqual(0);
+
+    // Flag every mine except the last one, plus one wrong (safe) cell —
+    // same total flag count as mineCount, but the set doesn't match.
+    let state = afterFirst;
+    for (const idx of mineIndices.slice(0, -1)) {
+      state = game.handleInput(state, { type: "toggleFlag", row: Math.floor(idx / state.width), col: idx % state.width });
+    }
+    state = game.handleInput(state, { type: "toggleFlag", row: Math.floor(wrongIndex / state.width), col: wrongIndex % state.width });
+
+    expect(state.flagCount).toBe(state.mineCount);
+    expect(state.phase).toBe("active");
+  });
+
+  it("does not clear while only some mines are flagged", () => {
+    const { game, state: s0 } = newGame("normal");
+    const afterFirst = game.handleInput(s0, { type: "reveal", row: 0, col: 0 });
+    const mineIndices = afterFirst.cells.map((c, i) => (c.mine ? i : -1)).filter((i) => i >= 0);
+
+    let state = afterFirst;
+    for (const idx of mineIndices.slice(0, mineIndices.length - 1)) {
+      state = game.handleInput(state, { type: "toggleFlag", row: Math.floor(idx / state.width), col: idx % state.width });
+    }
+
+    expect(state.phase).toBe("active");
+    expect(state.flagCount).toBe(mineIndices.length - 1);
+  });
+
+  it("unflagging a mine after all mines were flagged is impossible — the game already ended", () => {
+    const { game, state: s0 } = newGame("easy");
+    const afterFirst = game.handleInput(s0, { type: "reveal", row: 0, col: 0 });
+    const mineIndices = afterFirst.cells.map((c, i) => (c.mine ? i : -1)).filter((i) => i >= 0);
+
+    let state = afterFirst;
+    for (const idx of mineIndices) {
+      state = game.handleInput(state, { type: "toggleFlag", row: Math.floor(idx / state.width), col: idx % state.width });
+    }
+    expect(state.phase).toBe("cleared");
+    expect(() => game.handleInput(state, { type: "toggleFlag", row: Math.floor(mineIndices[0] / state.width), col: mineIndices[0] % state.width })).toThrow(
+      MinesweeperInputError,
+    );
+  });
+});
+
 describe("Minesweeper: timer lifecycle", () => {
   it("the timer is null before the first reveal, starts on the first reveal, and stops on the terminal reveal", () => {
     const clock = new FixedClock(50);

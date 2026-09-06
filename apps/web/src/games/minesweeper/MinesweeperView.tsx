@@ -84,7 +84,9 @@ export function MinesweeperView({
         <div className="flex w-full justify-start">
           <HomeLink onHome={onHome} />
         </div>
-        <p className="text-sm text-neutral-500">Clear the board as fast as you can. First click is always safe.</p>
+        <p className="text-sm text-neutral-500">
+          Flag every mine to clear — you don&apos;t have to reveal every safe cell. First click is always safe.
+        </p>
         <div className="flex gap-1.5 rounded-md border border-neutral-200 p-1">
           {DIFFICULTY_OPTIONS.map((opt) => {
             const cfg = MINESWEEPER_DIFFICULTIES[opt.id];

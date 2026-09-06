@@ -165,7 +165,19 @@ export class MinesweeperGame implements Game<MinesweeperState, MinesweeperInput,
     }
     const wasFlagged = current.state === "flagged";
     const cells = state.cells.map((c, i) => (i === idx ? { ...c, state: wasFlagged ? ("hidden" as const) : ("flagged" as const) } : c));
-    return { ...state, cells, flagCount: state.flagCount + (wasFlagged ? -1 : 1) };
+    const flagCount = state.flagCount + (wasFlagged ? -1 : 1);
+
+    // Clear as soon as every mine — and nothing but every mine — is
+    // flagged: the player doesn't have to reveal a single additional safe
+    // cell once they've correctly located all of them. (Revealing every
+    // safe cell, handleReveal's own win path, still also clears the
+    // game — this is an alternate, earlier way to reach the same
+    // "cleared" phase, not a replacement for it.)
+    if (flagCount === state.mineCount && cells.every((c) => c.mine === (c.state === "flagged"))) {
+      return { ...state, cells, flagCount, phase: "cleared", endedAtMs: this.clock.now() };
+    }
+
+    return { ...state, cells, flagCount };
   }
 
   isFinished(state: MinesweeperState): boolean {
